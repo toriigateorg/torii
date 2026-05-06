@@ -30,7 +30,7 @@ func Serve() *cli.Command {
 		Flags: []cli.Flag{
 			&cli.IntFlag{
 				Name:    "api-port",
-				Value:   1323,
+				Value:   1356,
 				Usage:   "port for the API server",
 				Sources: cli.EnvVars("API_PORT"),
 			},
