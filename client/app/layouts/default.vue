@@ -1,13 +1,25 @@
 <script setup lang="ts">
-import { Menu, Github, Activity } from "lucide-vue-next"
+import { Menu, Github, Activity, LogIn, LogOut, LayoutDashboard } from "lucide-vue-next"
 
-const navLinks = [
-  { to: "/#features", label: "Features" },
-  { to: "/#flow", label: "How it works" },
-  { to: "/health", label: "Status" },
-] as const
+const { isAuthed, user, signout } = useAuth()
+
+const navLinks = computed(() => {
+  const base = [
+    { to: "/#features", label: "Features" },
+    { to: "/#flow", label: "How it works" },
+    { to: "/health", label: "Status" },
+  ]
+  if (isAuthed.value) base.push({ to: "/dashboard", label: "Dashboard" })
+  return base
+})
 
 const mobileOpen = ref(false)
+
+async function onSignout() {
+  await signout()
+  mobileOpen.value = false
+  await navigateTo("/")
+}
 </script>
 
 <template>
@@ -47,6 +59,35 @@ const mobileOpen = ref(false)
             <Github class="size-4" />
           </a>
           <ThemeToggle />
+
+          <template v-if="isAuthed">
+            <DropdownMenu>
+              <DropdownMenuTrigger as-child>
+                <Button variant="outline" size="sm" class="hairline hidden sm:inline-flex font-mono text-xs h-9">
+                  {{ user?.username }}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" class="w-48">
+                <DropdownMenuItem as-child>
+                  <NuxtLink to="/dashboard" class="cursor-pointer">
+                    <LayoutDashboard class="size-4 mr-2" /> Dashboard
+                  </NuxtLink>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem class="cursor-pointer" @select="onSignout">
+                  <LogOut class="size-4 mr-2" /> Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </template>
+          <template v-else>
+            <NuxtLink to="/signin" class="hidden sm:inline-flex">
+              <Button variant="outline" size="sm" class="hairline h-9">
+                <LogIn class="size-4 mr-2" /> Sign in
+              </Button>
+            </NuxtLink>
+          </template>
+
           <Sheet v-model:open="mobileOpen">
             <SheetTrigger as-child>
               <Button variant="ghost" size="icon" class="md:hidden hairline rounded-md size-9" aria-label="Open menu">
@@ -67,6 +108,35 @@ const mobileOpen = ref(false)
                 >
                   {{ link.label }}
                 </NuxtLink>
+                <div class="mt-4 pt-4 border-t border-border/60">
+                  <template v-if="isAuthed">
+                    <p class="px-3 py-2 text-xs text-muted-foreground font-mono">
+                      signed in as {{ user?.username }}
+                    </p>
+                    <button
+                      class="w-full text-left px-3 py-2.5 text-sm rounded-md hover:bg-accent transition-colors flex items-center"
+                      @click="onSignout"
+                    >
+                      <LogOut class="size-4 mr-2" /> Sign out
+                    </button>
+                  </template>
+                  <template v-else>
+                    <NuxtLink
+                      to="/signin"
+                      class="px-3 py-2.5 text-sm rounded-md hover:bg-accent transition-colors flex items-center"
+                      @click="mobileOpen = false"
+                    >
+                      <LogIn class="size-4 mr-2" /> Sign in
+                    </NuxtLink>
+                    <NuxtLink
+                      to="/signup"
+                      class="px-3 py-2.5 text-sm rounded-md hover:bg-accent transition-colors"
+                      @click="mobileOpen = false"
+                    >
+                      Create account
+                    </NuxtLink>
+                  </template>
+                </div>
               </nav>
             </SheetContent>
           </Sheet>

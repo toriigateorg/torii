@@ -8,3 +8,8 @@ sql:
         package: db
         out: internal/db
         sql_package: pgx/v5
+        overrides:
+          - go_type:
+              import: github.com/google/uuid
+              type: UUID
+            db_type: uuid

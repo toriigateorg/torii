@@ -7,10 +7,14 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v5"
+
+	"sanmon/internal/auth"
+	"sanmon/internal/config"
+	"sanmon/internal/db"
 )
 
 // Register mounts the /api/v1 routes on the given echo instance.
-func Register(e *echo.Echo, pool *pgxpool.Pool) {
+func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config) {
 	v1 := e.Group("/api/v1")
 
 	v1.GET("/health", func(c *echo.Context) error {
@@ -32,4 +36,16 @@ func Register(e *echo.Echo, pool *pgxpool.Pool) {
 			"api": true,
 		})
 	})
+
+	if pool == nil || cfg == nil {
+		return
+	}
+
+	h := &authHandlers{q: db.New(pool), cfg: cfg}
+
+	v1.POST("/signup", h.signup)
+	v1.POST("/signin", h.signin)
+	v1.POST("/token_refresh", h.tokenRefresh)
+	v1.POST("/logout", h.logout)
+	v1.GET("/me", h.me, auth.RequireUser(cfg.JWTSecret))
 }

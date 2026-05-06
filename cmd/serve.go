@@ -20,6 +20,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"sanmon/internal/api"
+	"sanmon/internal/config"
 	"sanmon/internal/db"
 	"sanmon/internal/proxy"
 )
@@ -118,10 +119,15 @@ func runInner(ctx context.Context, host string, port int) error {
 		defer pool.Close()
 	}
 
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[config] auth disabled:", err)
+	}
+
 	e := echo.New()
 	e.Use(middleware.RequestLogger())
 
-	api.Register(e, pool)
+	api.Register(e, pool, cfg)
 
 	// Catch-all proxy to Nuxt for anything that didn't match /api/v1/*.
 	e.Any("/*", proxy.Nuxt())
