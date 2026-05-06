@@ -1,21 +1,29 @@
 package main
 
 import (
-	"net/http"
+	"context"
+	"log"
+	"os"
 
-	"github.com/labstack/echo/v5"
-	"github.com/labstack/echo/v5/middleware"
+	"github.com/joho/godotenv"
+	"github.com/urfave/cli/v3"
+
+	"sanmon/cmd"
 )
 
 func main() {
-	e := echo.New()
-	e.Use(middleware.RequestLogger())
+	_ = godotenv.Load()
 
-	e.GET("/", func(c *echo.Context) error {
-		return c.String(http.StatusOK, "Hello, World!")
-	})
+	app := &cli.Command{
+		Name:  "sanmon",
+		Usage: "sanmon server and tooling",
+		Commands: []*cli.Command{
+			cmd.Serve(),
+			cmd.Migrate(),
+		},
+	}
 
-	if err := e.Start(":1323"); err != nil {
-		e.Logger.Error("failed to start server", "error", err)
+	if err := app.Run(context.Background(), os.Args); err != nil {
+		log.Fatal(err)
 	}
 }

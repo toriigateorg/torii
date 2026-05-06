@@ -24,8 +24,8 @@ bin = "tmp/main"
 entrypoint = ["./tmp/main"]
 # Customize binary, can setup environment variables when run your app.
 full_bin = "APP_ENV=dev APP_USER=air ./tmp/main"
-# Add additional arguments when running binary (bin/full_bin). Will run './tmp/main hello world'.
-args_bin = ["hello", "world"]
+# Add additional arguments when running binary (bin/full_bin). Will run './tmp/main serve --inner'.
+args_bin = ["serve", "--inner"]
 # Watch these filename extensions. Use ["*"] to watch all file extensions.
 include_ext = ["go", "tpl", "tmpl", "html"]
 # Ignore these filename extensions or directories.
