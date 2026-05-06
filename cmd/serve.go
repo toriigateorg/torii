@@ -20,6 +20,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"sanmon/internal/api"
+	"sanmon/internal/db"
 	"sanmon/internal/proxy"
 )
 
@@ -110,10 +111,17 @@ func runInner(ctx context.Context, host string, port int) error {
 
 	nuxtDone := startNuxt(ctx)
 
+	pool, err := db.Open(ctx)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[db] pool unavailable:", err)
+	} else {
+		defer pool.Close()
+	}
+
 	e := echo.New()
 	e.Use(middleware.RequestLogger())
 
-	api.Register(e)
+	api.Register(e, pool)
 
 	// Catch-all proxy to Nuxt for anything that didn't match /api/v1/*.
 	e.Any("/*", proxy.Nuxt())

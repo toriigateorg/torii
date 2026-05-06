@@ -12,7 +12,19 @@ export default defineNuxtConfig({
     plugins: [tailwindcss()],
   },
 
-  modules: ["shadcn-nuxt"],
+  experimental: {
+    viteEnvironmentApi: true,
+  },
+
+  modules: ["shadcn-nuxt", "@nuxtjs/color-mode"],
+
+  colorMode: {
+    preference: "system",
+    fallback: "light",
+    classSuffix: "",
+    storageKey: "sanmon-theme",
+  },
+
   shadcn: {
     /**
      * Prefix for all the imported component.
@@ -28,4 +40,3 @@ export default defineNuxtConfig({
     componentDir: "@/components/ui",
   },
 });
-
