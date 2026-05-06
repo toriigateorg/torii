@@ -12,6 +12,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countRefreshTokens = `-- name: CountRefreshTokens :one
+SELECT count(*) FROM refresh_tokens
+`
+
+func (q *Queries) CountRefreshTokens(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countRefreshTokens)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createRefreshToken = `-- name: CreateRefreshToken :one
 INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
 VALUES ($1, $2, $3)
@@ -36,6 +47,18 @@ func (q *Queries) CreateRefreshToken(ctx context.Context, arg CreateRefreshToken
 		&i.RevokedAt,
 	)
 	return i, err
+}
+
+const deleteExpiredOrRevokedRefreshTokens = `-- name: DeleteExpiredOrRevokedRefreshTokens :execrows
+DELETE FROM refresh_tokens WHERE expires_at < now() OR revoked_at IS NOT NULL
+`
+
+func (q *Queries) DeleteExpiredOrRevokedRefreshTokens(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredOrRevokedRefreshTokens)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteExpiredRefreshTokens = `-- name: DeleteExpiredRefreshTokens :exec
@@ -81,4 +104,95 @@ func (q *Queries) GetRefreshTokenByHash(ctx context.Context, tokenHash []byte) (
 		&i.RevokedAt,
 	)
 	return i, err
+}
+
+const getRefreshTokenByID = `-- name: GetRefreshTokenByID :one
+SELECT id, user_id, token_hash, expires_at, created_at, revoked_at FROM refresh_tokens WHERE id = $1
+`
+
+func (q *Queries) GetRefreshTokenByID(ctx context.Context, id uuid.UUID) (RefreshToken, error) {
+	row := q.db.QueryRow(ctx, getRefreshTokenByID, id)
+	var i RefreshToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.TokenHash,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
+const listRefreshTokensWithUsers = `-- name: ListRefreshTokensWithUsers :many
+SELECT
+    rt.id,
+    rt.user_id,
+    rt.token_hash,
+    rt.expires_at,
+    rt.created_at,
+    rt.revoked_at,
+    u.username,
+    u.email,
+    u.user_type
+FROM refresh_tokens rt
+JOIN users u ON u.id = rt.user_id
+ORDER BY rt.created_at DESC, rt.id ASC
+LIMIT $2::int OFFSET $1::int
+`
+
+type ListRefreshTokensWithUsersParams struct {
+	Off int32
+	Lim int32
+}
+
+type ListRefreshTokensWithUsersRow struct {
+	ID        uuid.UUID
+	UserID    uuid.UUID
+	TokenHash []byte
+	ExpiresAt pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
+	RevokedAt pgtype.Timestamptz
+	Username  string
+	Email     string
+	UserType  string
+}
+
+func (q *Queries) ListRefreshTokensWithUsers(ctx context.Context, arg ListRefreshTokensWithUsersParams) ([]ListRefreshTokensWithUsersRow, error) {
+	rows, err := q.db.Query(ctx, listRefreshTokensWithUsers, arg.Off, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRefreshTokensWithUsersRow
+	for rows.Next() {
+		var i ListRefreshTokensWithUsersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.TokenHash,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.RevokedAt,
+			&i.Username,
+			&i.Email,
+			&i.UserType,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const revokeRefreshToken = `-- name: RevokeRefreshToken :exec
+UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1
+`
+
+func (q *Queries) RevokeRefreshToken(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, revokeRefreshToken, id)
+	return err
 }

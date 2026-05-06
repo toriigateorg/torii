@@ -48,4 +48,12 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config) {
 	v1.POST("/token_refresh", h.tokenRefresh)
 	v1.POST("/logout", h.logout)
 	v1.GET("/me", h.me, auth.RequireUser(cfg.JWTSecret))
+
+	admin := v1.Group("/admin", auth.RequireAdmin(cfg.JWTSecret))
+	admin.GET("/users", h.adminListUsers)
+	admin.POST("/users", h.adminCreateUser)
+	admin.DELETE("/users/:id", h.adminDeleteUser)
+	admin.GET("/tokens", h.adminListTokens)
+	admin.DELETE("/tokens/:id", h.adminRevokeToken)
+	admin.POST("/tokens/cleanup", h.adminCleanupTokens)
 }

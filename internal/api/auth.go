@@ -96,13 +96,19 @@ func (h *authHandlers) signup(c *echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	}
 
-	user, err := h.q.CreateUser(c.Request().Context(), db.CreateUserParams{
+	ctx := c.Request().Context()
+	userType := "user"
+	if count, err := h.q.CountUsers(ctx); err == nil && count == 0 {
+		userType = "admin"
+	}
+
+	user, err := h.q.CreateUser(ctx, db.CreateUserParams{
 		Username:     req.Username,
 		Email:        req.Email,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
 		PasswordHash: hash,
-		UserType:     "user",
+		UserType:     userType,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError

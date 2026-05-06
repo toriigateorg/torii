@@ -11,3 +11,14 @@ SELECT * FROM users
 WHERE lower(username) = lower($1::text)
    OR lower(email) = lower($1::text)
 LIMIT 1;
+
+-- name: ListUsers :many
+SELECT * FROM users
+ORDER BY created_at ASC, id ASC
+LIMIT sqlc.arg('lim')::int OFFSET sqlc.arg('off')::int;
+
+-- name: CountUsers :one
+SELECT count(*) FROM users;
+
+-- name: DeleteUser :exec
+DELETE FROM users WHERE id = $1;
