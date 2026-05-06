@@ -1,0 +1,33 @@
+.git
+.gitignore
+.github
+*.md
+
+# dev outputs
+tmp/
+postgres-data/
+
+# client build artifacts (we re-build inside Docker)
+client/node_modules
+client/.nuxt
+client/.output
+
+# Go binary outputs
+sanmon
+*.test
+*.out
+
+# previously-staged embed payload (rebuilt fresh in the image)
+internal/web/dist/*
+!internal/web/dist/.gitkeep
+
+# editor / OS junk
+.idea
+.vscode
+.DS_Store
+
+# env files (compose pulls these from the host)
+.env
+.env.*
+.app.env
+.postgres.env

@@ -23,6 +23,7 @@ import (
 	"sanmon/internal/config"
 	"sanmon/internal/db"
 	"sanmon/internal/proxy"
+	"sanmon/internal/web"
 )
 
 func Serve() *cli.Command {
@@ -43,6 +44,10 @@ func Serve() *cli.Command {
 				Sources: cli.EnvVars("API_HOST"),
 			},
 			&cli.BoolFlag{
+				Name:  "migrate",
+				Usage: "apply pending migrations before serving",
+			},
+			&cli.BoolFlag{
 				Name:   "inner",
 				Usage:  "internal: invoked by air to actually serve",
 				Hidden: true,
@@ -51,8 +56,23 @@ func Serve() *cli.Command {
 		Action: func(ctx context.Context, c *cli.Command) error {
 			host := c.String("api-host")
 			port := c.Int("api-port")
+			isInner := c.Bool("inner")
 
-			if c.Bool("inner") {
+			// Migrations only run on the user-invoked entrypoint (not on each
+			// air-spawned restart, which would double-apply).
+			if !isInner && c.Bool("migrate") {
+				fmt.Println("[migrate] applying pending migrations...")
+				if err := migrateUp(""); err != nil {
+					return fmt.Errorf("migrate: %w", err)
+				}
+			}
+
+			if isInner {
+				return runInner(ctx, host, int(port))
+			}
+			// In production, skip air + Nuxt orchestration entirely; the
+			// binary serves the embedded SPA directly.
+			if isProdEnv() {
 				return runInner(ctx, host, int(port))
 			}
 			return runOuter(ctx, host, int(port))
@@ -104,13 +124,19 @@ func runOuter(ctx context.Context, host string, port int) error {
 	return nil
 }
 
-// runInner is the actual server: spawns Nuxt as a child, starts echo, and
-// reverse-proxies non-/api/* traffic to Nuxt on :3000.
+// runInner is the actual server. In dev it spawns Nuxt as a child and
+// reverse-proxies non-/api/* traffic to it; in prod it serves the embedded
+// SPA directly.
 func runInner(ctx context.Context, host string, port int) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	nuxtDone := startNuxt(ctx)
+	prod := isProdEnv()
+
+	var nuxtDone <-chan struct{}
+	if !prod {
+		nuxtDone = startNuxt(ctx)
+	}
 
 	pool, err := db.Open(ctx)
 	if err != nil {
@@ -129,10 +155,16 @@ func runInner(ctx context.Context, host string, port int) error {
 
 	api.Register(e, pool, cfg)
 
-	// Catch-all proxy to Nuxt for anything that didn't match /api/v1/*.
-	e.Any("/*", proxy.Nuxt())
-
-	go waitForNuxt("127.0.0.1:3000", 10*time.Second)
+	if prod {
+		if !web.HasAssets() {
+			fmt.Fprintln(os.Stderr, "[web] WARNING: embedded SPA is empty — build the client (bun run generate) and copy client/.output/public/* into internal/web/dist/ before `go build`")
+		}
+		e.Any("/*", web.Handler())
+	} else {
+		// Catch-all proxy to Nuxt for anything that didn't match /api/v1/*.
+		e.Any("/*", proxy.Nuxt())
+		go waitForNuxt("127.0.0.1:3000", 10*time.Second)
+	}
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", host, port),
@@ -156,7 +188,9 @@ func runInner(ctx context.Context, host string, port int) error {
 	case <-ctx.Done():
 	case err := <-serverErr:
 		cancel()
-		<-nuxtDone
+		if nuxtDone != nil {
+			<-nuxtDone
+		}
 		return err
 	}
 
@@ -165,8 +199,15 @@ func runInner(ctx context.Context, host string, port int) error {
 	_ = srv.Shutdown(shutdownCtx)
 
 	cancel()
-	<-nuxtDone
+	if nuxtDone != nil {
+		<-nuxtDone
+	}
 	return nil
+}
+
+func isProdEnv() bool {
+	env := os.Getenv("APP_ENV")
+	return env != "" && env != "dev"
 }
 
 // startNuxt runs `bun run dev` in ./client. It places the child in its own
