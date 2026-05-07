@@ -158,8 +158,16 @@ function goHome() {
       </div>
 
       <footer class="py-6 flex items-center justify-between text-mono-label">
-        <span>identity-aware reverse proxy</span>
-        <NuxtLink to="/" class="hover:text-foreground transition-colors">/</NuxtLink>
+        <span>&copy; 2026 sanmon</span>
+        <span>
+          crafted by
+          <a
+            href="https://codingcoffee.dev"
+            target="_blank"
+            rel="noopener"
+            class="text-foreground/80 hover:text-foreground underline-offset-4 hover:underline transition-colors"
+          >Ameya Shenoy</a>
+        </span>
       </footer>
     </div>
   </main>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Menu, Github, Activity, LogIn, LogOut, LayoutDashboard, ShieldCheck } from "lucide-vue-next"
+import { Menu, Github, LogIn, LogOut, LayoutDashboard, ShieldCheck } from "lucide-vue-next"
 
 const { isAuthed, isAdmin, user, signout } = useAuth()
 const route = useRoute()
@@ -148,17 +148,18 @@ async function onSignout() {
 
     <footer class="border-t border-border/60 mt-24">
       <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div class="flex items-center gap-3">
-          <Activity class="size-3.5 text-primary" aria-hidden="true" />
-          <span class="font-mono text-xs text-muted-foreground">
-            sanmon &middot; identity-aware reverse proxy
-          </span>
-        </div>
-        <div class="flex items-center gap-6 text-xs text-muted-foreground">
-          <NuxtLink to="/health" class="hover:text-foreground transition-colors">/health</NuxtLink>
-          <a href="#" class="hover:text-foreground transition-colors">docs</a>
-          <a href="#" class="hover:text-foreground transition-colors">github</a>
-        </div>
+        <span class="font-mono text-xs text-muted-foreground">
+          &copy; 2026 sanmon
+        </span>
+        <span class="font-mono text-xs text-muted-foreground">
+          crafted by
+          <a
+            href="https://codingcoffee.dev"
+            target="_blank"
+            rel="noopener"
+            class="text-foreground/80 hover:text-foreground underline-offset-4 hover:underline transition-colors"
+          >Ameya Shenoy</a>
+        </span>
       </div>
     </footer>
   </div>
