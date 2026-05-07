@@ -2,16 +2,11 @@
 import { Menu, Github, Activity, LogIn, LogOut, LayoutDashboard, ShieldCheck } from "lucide-vue-next"
 
 const { isAuthed, isAdmin, user, signout } = useAuth()
+const route = useRoute()
 
-const navLinks = computed(() => {
-  const base = [
-    { to: "/#features", label: "Features" },
-    { to: "/#flow", label: "How it works" },
-    { to: "/health", label: "Status" },
-  ]
-  if (isAuthed.value) base.push({ to: "/dashboard", label: "Dashboard" })
-  return base
-})
+const navLinks: { to: string; label: string }[] = []
+
+const isLanding = computed(() => route.path === "/")
 
 const mobileOpen = ref(false)
 
@@ -26,7 +21,8 @@ async function onSignout() {
   <div class="min-h-screen bg-background text-foreground flex flex-col">
     <a href="#main-content" class="skip-link">Skip to main content</a>
     <header
-      class="sticky top-0 z-40 w-full border-b border-border/60 bg-background/70 backdrop-blur-xl"
+      class="sticky top-0 z-40 w-full backdrop-blur-xl transition-colors"
+      :class="isLanding ? 'border-b border-border/30 bg-background/30' : 'border-b border-border/60 bg-background/70'"
     >
       <div class="mx-auto max-w-7xl flex h-14 items-center justify-between px-4 sm:px-6 lg:px-8">
         <NuxtLink to="/" class="flex items-center gap-2 group" aria-label="sanmon — home">
@@ -41,17 +37,6 @@ async function onSignout() {
           <span class="font-semibold tracking-tight">sanmon</span>
           <span class="text-mono-label hidden sm:inline ml-2">v0.1</span>
         </NuxtLink>
-
-        <nav class="hidden md:flex items-center gap-1" aria-label="Primary">
-          <NuxtLink
-            v-for="link in navLinks"
-            :key="link.to"
-            :to="link.to"
-            class="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {{ link.label }}
-          </NuxtLink>
-        </nav>
 
         <div class="flex items-center gap-2">
           <a
