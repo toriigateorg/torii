@@ -423,6 +423,44 @@ func (q *Queries) ListServiceRoles(ctx context.Context, serviceID uuid.UUID) ([]
 	return items, nil
 }
 
+const listServicesForUser = `-- name: ListServicesForUser :many
+SELECT DISTINCT s.id, s.title, s.description, s.service_url, s.domain, s.headers, s.created_at, s.updated_at
+FROM services s
+JOIN role_services rs ON rs.service_id = s.id
+JOIN user_roles ur ON ur.role_id = rs.role_id
+WHERE ur.user_id = $1
+ORDER BY s.title ASC, s.id ASC
+`
+
+func (q *Queries) ListServicesForUser(ctx context.Context, userID uuid.UUID) ([]Service, error) {
+	rows, err := q.db.Query(ctx, listServicesForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Service
+	for rows.Next() {
+		var i Service
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Description,
+			&i.ServiceUrl,
+			&i.Domain,
+			&i.Headers,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUserRoles = `-- name: ListUserRoles :many
 SELECT r.id, r.name, r.description, r.is_system, r.created_at, r.updated_at FROM roles r
 JOIN user_roles ur ON ur.role_id = r.id

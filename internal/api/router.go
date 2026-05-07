@@ -50,6 +50,7 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	v1.POST("/token_refresh", h.tokenRefresh)
 	v1.POST("/logout", h.logout)
 	v1.GET("/me", h.me, auth.RequireUser(cfg.JWTSecret))
+	v1.GET("/me/services", h.myServices, auth.RequireUser(cfg.JWTSecret))
 
 	secret := cfg.JWTSecret
 	onDenied := func(c *echo.Context, perm string) {

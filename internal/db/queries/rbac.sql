@@ -96,6 +96,14 @@ JOIN role_services rs ON rs.role_id = r.id
 WHERE rs.service_id = $1
 ORDER BY r.name ASC;
 
+-- name: ListServicesForUser :many
+SELECT DISTINCT s.*
+FROM services s
+JOIN role_services rs ON rs.service_id = s.id
+JOIN user_roles ur ON ur.role_id = rs.role_id
+WHERE ur.user_id = $1
+ORDER BY s.title ASC, s.id ASC;
+
 -- name: AssignRoleService :exec
 INSERT INTO role_services (role_id, service_id)
 VALUES ($1, $2)
