@@ -307,6 +307,11 @@ func (h *authHandlers) logout(c *echo.Context) error {
 	}
 	h.auditor.LogFromEcho(c, audit.Event{EventType: audit.EventLogout})
 	auth.ClearAuthCookies(c, secure)
+	// Tell the browser to flush its HTTP cache for this origin so the next
+	// navigation can't serve a stale upstream HTML payload that still has
+	// the user "signed in" visually.
+	c.Response().Header().Set("Clear-Site-Data", `"cache", "storage"`)
+	c.Response().Header().Set("Cache-Control", "no-store")
 	return c.NoContent(http.StatusNoContent)
 }
 

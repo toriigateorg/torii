@@ -46,9 +46,14 @@ const sanmonOverlay = `<div id="__sanmon_overlay" data-sanmon></div>
   var btn = root.querySelector('button');
   btn.addEventListener('click', function(){
     btn.disabled = true;
-    fetch('/api/v1/logout', { method:'POST', credentials:'include' })
+    fetch('/api/v1/logout', { method:'POST', credentials:'include', cache:'no-store' })
       .catch(function(){})
-      .finally(function(){ window.location.assign('/'); });
+      .finally(function(){
+        // Replace + cache-buster so the browser cannot serve the upstream's
+        // cached HTML for "/" — we want the proxy dispatch to re-evaluate
+        // with the now-cleared cookies and bounce us into the sanmon SPA.
+        window.location.replace('/?sanmon_logout=' + Date.now());
+      });
   });
 })();</script>`
 
