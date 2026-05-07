@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v5"
 
+	"sanmon/internal/audit"
 	"sanmon/internal/auth"
 	"sanmon/internal/config"
 	"sanmon/internal/db"
@@ -22,10 +23,11 @@ import (
 )
 
 type authHandlers struct {
-	pool  *pgxpool.Pool
-	q     *db.Queries
-	cfg   *config.Config
-	cache *proxy.ServiceCache
+	pool    *pgxpool.Pool
+	q       *db.Queries
+	cfg     *config.Config
+	cache   *proxy.ServiceCache
+	auditor *audit.Logger
 }
 
 type roleSummary struct {
@@ -95,17 +97,32 @@ func (h *authHandlers) signup(c *echo.Context) error {
 	req.FirstName = strings.TrimSpace(req.FirstName)
 	req.LastName = strings.TrimSpace(req.LastName)
 
+	signupFail := func(reason string) {
+		h.auditor.LogFromEcho(c, audit.Event{
+			EventType: audit.EventSignupFailed,
+			Metadata: map[string]any{
+				"username": req.Username,
+				"email":    req.Email,
+				"reason":   reason,
+			},
+		})
+	}
+
 	if !usernameRe.MatchString(req.Username) {
+		signupFail("invalid_username")
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "username must be 3-64 chars: letters, digits, _ . -"})
 	}
 	if !emailRe.MatchString(req.Email) {
+		signupFail("invalid_email")
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid email"})
 	}
 	if h.cfg.IsProd() {
 		if err := auth.ValidatePasswordStrength(req.Password); err != nil {
+			signupFail("weak_password")
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
 	} else if req.Password == "" {
+		signupFail("missing_password")
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "password required"})
 	}
 
@@ -129,6 +146,7 @@ func (h *authHandlers) signup(c *echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	}
 	if count > 0 && !h.getBoolSetting(ctx, settingSignupEnabled, true) {
+		signupFail("signup_disabled")
 		return c.JSON(http.StatusForbidden, map[string]string{"error": "new account signups are disabled"})
 	}
 
@@ -142,8 +160,10 @@ func (h *authHandlers) signup(c *echo.Context) error {
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			signupFail("conflict")
 			return c.JSON(http.StatusConflict, map[string]string{"error": "username or email already taken"})
 		}
+		signupFail("server_error")
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not create user"})
 	}
 
@@ -169,6 +189,20 @@ func (h *authHandlers) signup(c *echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	}
 
+	uid := user.ID
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:     audit.EventSignupSuccess,
+		ActorUserID:   &uid,
+		ActorUsername: user.Username,
+		TargetType:    audit.TargetUser,
+		TargetID:      &uid,
+		TargetName:    user.Username,
+		Metadata: map[string]any{
+			"first_user_admin": count == 0,
+			"after":            audit.SnapshotUser(user),
+		},
+	})
+
 	return h.issueAndRespond(c, user)
 }
 
@@ -182,16 +216,40 @@ func (h *authHandlers) signin(c *echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "identifier and password required"})
 	}
 
+	signinFail := func(reason string, uid *uuid.UUID, username string) {
+		h.auditor.LogFromEcho(c, audit.Event{
+			EventType:     audit.EventSigninFailed,
+			ActorUserID:   uid,
+			ActorUsername: username,
+			Metadata: map[string]any{
+				"identifier": req.Identifier,
+				"reason":     reason,
+			},
+		})
+	}
+
 	user, err := h.q.GetUserByUsernameOrEmail(c.Request().Context(), req.Identifier)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			signinFail("unknown_user", nil, "")
 			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	}
 	if !user.PasswordHash.Valid || !auth.VerifyPassword(user.PasswordHash.String, req.Password) {
+		uid := user.ID
+		signinFail("bad_password", &uid, user.Username)
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 	}
+	uid := user.ID
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:     audit.EventSigninSuccess,
+		ActorUserID:   &uid,
+		ActorUsername: user.Username,
+		TargetType:    audit.TargetUser,
+		TargetID:      &uid,
+		TargetName:    user.Username,
+	})
 	return h.issueAndRespond(c, user)
 }
 
@@ -199,8 +257,17 @@ func (h *authHandlers) tokenRefresh(c *echo.Context) error {
 	secure := h.cfg.IsProd()
 	ctx := c.Request().Context()
 
+	refreshFail := func(reason string, uid *uuid.UUID) {
+		h.auditor.LogFromEcho(c, audit.Event{
+			EventType:   audit.EventTokenRefreshFailed,
+			ActorUserID: uid,
+			Metadata:    map[string]any{"reason": reason},
+		})
+	}
+
 	cookie, err := c.Cookie(auth.RefreshCookie)
 	if err != nil || cookie.Value == "" {
+		refreshFail("missing_cookie", nil)
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "no refresh token"})
 	}
 	hash := auth.HashRefreshToken(cookie.Value)
@@ -208,17 +275,22 @@ func (h *authHandlers) tokenRefresh(c *echo.Context) error {
 	row, err := h.q.GetRefreshTokenByHash(ctx, hash)
 	if err != nil {
 		auth.ClearAuthCookies(c, secure)
+		refreshFail("invalid_token", nil)
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid refresh token"})
 	}
 	if !row.ExpiresAt.Valid || time.Now().After(row.ExpiresAt.Time) || row.RevokedAt.Valid {
 		_ = h.q.DeleteRefreshTokenByHash(ctx, hash)
 		auth.ClearAuthCookies(c, secure)
+		uid := row.UserID
+		refreshFail("expired_or_revoked", &uid)
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "refresh token expired"})
 	}
 
 	user, err := h.q.GetUserByID(ctx, row.UserID)
 	if err != nil {
 		auth.ClearAuthCookies(c, secure)
+		uid := row.UserID
+		refreshFail("user_not_found", &uid)
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "user not found"})
 	}
 
@@ -233,6 +305,7 @@ func (h *authHandlers) logout(c *echo.Context) error {
 	if cookie, err := c.Cookie(auth.RefreshCookie); err == nil && cookie.Value != "" {
 		_ = h.q.DeleteRefreshTokenByHash(c.Request().Context(), auth.HashRefreshToken(cookie.Value))
 	}
+	h.auditor.LogFromEcho(c, audit.Event{EventType: audit.EventLogout})
 	auth.ClearAuthCookies(c, secure)
 	return c.NoContent(http.StatusNoContent)
 }

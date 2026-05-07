@@ -43,6 +43,8 @@ WORKDIR /app
 COPY --from=server /out/sanmon /usr/local/bin/sanmon
 COPY migrations /app/migrations
 
+RUN mkdir -p /app/logs && chown sanmon:sanmon /app/logs
+
 USER sanmon
 EXPOSE 1356
 

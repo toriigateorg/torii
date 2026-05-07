@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v5"
 
+	"sanmon/internal/audit"
 	"sanmon/internal/auth"
 	"sanmon/internal/db"
 )
@@ -99,6 +100,18 @@ func (h *authHandlers) adminRevokeToken(c *echo.Context) error {
 	if err := h.q.RevokeRefreshToken(ctx, id); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not revoke token"})
 	}
+	tid := id
+	targetUser := row.UserID
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:  audit.EventTokenRevokedByAdmin,
+		TargetType: audit.TargetToken,
+		TargetID:   &tid,
+		Metadata: map[string]any{
+			"user_id":    targetUser.String(),
+			"created_at": audit.TimestamptzToString(row.CreatedAt),
+			"expires_at": audit.TimestamptzToString(row.ExpiresAt),
+		},
+	})
 	return c.NoContent(http.StatusNoContent)
 }
 
@@ -107,6 +120,10 @@ func (h *authHandlers) adminCleanupTokens(c *echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not cleanup tokens"})
 	}
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType: audit.EventTokenCleanup,
+		Metadata:  map[string]any{"deleted": n},
+	})
 	return c.JSON(http.StatusOK, map[string]int64{"deleted": n})
 }
 

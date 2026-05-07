@@ -15,6 +15,20 @@ type AppSetting struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
+type AuditLog struct {
+	ID            uuid.UUID
+	CreatedAt     pgtype.Timestamptz
+	EventType     string
+	ActorUserID   uuid.NullUUID
+	ActorUsername string
+	TargetType    string
+	TargetID      uuid.NullUUID
+	TargetName    string
+	ClientIp      string
+	UserAgent     string
+	Metadata      []byte
+}
+
 type RefreshToken struct {
 	ID        uuid.UUID
 	UserID    uuid.UUID

@@ -13,3 +13,8 @@ sql:
               import: github.com/google/uuid
               type: UUID
             db_type: uuid
+          - go_type:
+              import: github.com/google/uuid
+              type: NullUUID
+            db_type: uuid
+            nullable: true

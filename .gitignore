@@ -29,4 +29,6 @@ tmp/
 postgres-data/
 internal/web/dist/*
 !internal/web/dist/.gitkeep
+logs/*
+!logs/.gitkeep
 

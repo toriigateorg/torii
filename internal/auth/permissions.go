@@ -36,6 +36,8 @@ const (
 
 	PermSettingsRead   = "settings.read"
 	PermSettingsUpdate = "settings.update"
+
+	PermAuditRead = "audit.read"
 )
 
 var AllPermissions = []string{
@@ -48,6 +50,7 @@ var AllPermissions = []string{
 	PermPermissionsRead,
 	PermSSOCreate, PermSSORead, PermSSOUpdate, PermSSODelete,
 	PermSettingsRead, PermSettingsUpdate,
+	PermAuditRead,
 }
 
 var permissionSet = func() map[string]struct{} {

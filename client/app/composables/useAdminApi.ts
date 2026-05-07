@@ -111,6 +111,35 @@ export interface UpdateAppSettingsPayload {
   signup_enabled?: boolean
 }
 
+export interface AuditLog {
+  id: string
+  created_at: string
+  event_type: string
+  actor_user_id: string | null
+  actor_username: string
+  target_type: string
+  target_id: string | null
+  target_name: string
+  client_ip: string
+  user_agent: string
+  metadata: Record<string, unknown>
+}
+
+export interface AuditLogListResponse extends PageMeta {
+  items: AuditLog[]
+}
+
+export interface AuditLogQuery {
+  page?: number
+  page_size?: number
+  actor_user_id?: string
+  event_type?: string
+  target_type?: string
+  target_id?: string
+  from?: string
+  to?: string
+}
+
 export interface SSOProviderPayload {
   slug: string
   name: string
@@ -306,6 +335,21 @@ export function useAdminApi() {
         ...opts(),
         method: "PUT",
         body: payload,
+      })
+    },
+    listAuditLogs(query: AuditLogQuery = {}) {
+      const q: Record<string, string | number> = {}
+      if (query.page) q.page = query.page
+      if (query.page_size) q.page_size = query.page_size
+      if (query.actor_user_id) q.actor_user_id = query.actor_user_id
+      if (query.event_type) q.event_type = query.event_type
+      if (query.target_type) q.target_type = query.target_type
+      if (query.target_id) q.target_id = query.target_id
+      if (query.from) q.from = query.from
+      if (query.to) q.to = query.to
+      return $fetch<AuditLogListResponse>("/api/v1/admin/audit", {
+        ...opts(),
+        query: q,
       })
     },
   }

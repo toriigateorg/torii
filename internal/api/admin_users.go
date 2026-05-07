@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v5"
 
+	"sanmon/internal/audit"
 	"sanmon/internal/auth"
 	"sanmon/internal/db"
 )
@@ -118,6 +119,15 @@ func (h *authHandlers) adminCreateUser(c *echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	}
 
+	uid := user.ID
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:  audit.EventUserCreated,
+		TargetType: audit.TargetUser,
+		TargetID:   &uid,
+		TargetName: user.Username,
+		Metadata:   map[string]any{"after": audit.SnapshotUser(user)},
+	})
+
 	roles, perms, _, err := h.loadUserAuthz(ctx, user.ID)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not load roles"})
@@ -142,9 +152,18 @@ func (h *authHandlers) adminDeleteUser(c *echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "cannot delete the sole admin user"})
 	}
 
+	target, _ := h.q.GetUserByID(ctx, id)
 	if err := h.q.DeleteUser(ctx, id); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not delete user"})
 	}
+	uid := id
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:  audit.EventUserDeleted,
+		TargetType: audit.TargetUser,
+		TargetID:   &uid,
+		TargetName: target.Username,
+		Metadata:   map[string]any{"before": audit.SnapshotUser(target)},
+	})
 	return c.NoContent(http.StatusNoContent)
 }
 

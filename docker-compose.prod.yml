@@ -14,6 +14,9 @@ services:
       - .app.env
     environment:
       APP_ENV: production
+      AUDIT_LOG_DIR: /app/logs
+    volumes:
+      - audit-logs:/app/logs
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:1356/api/v1/health"]
       interval: 30s
@@ -36,3 +39,4 @@ services:
 
 volumes:
   postgres-data:
+  audit-logs:

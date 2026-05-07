@@ -23,7 +23,7 @@ func RequireUser(secret []byte) echo.MiddlewareFunc {
 	}
 }
 
-func RequirePermission(secret []byte, perm string) echo.MiddlewareFunc {
+func RequirePermission(secret []byte, perm string, onDenied func(c *echo.Context, perm string)) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			claims, err := authenticate(c, secret)
@@ -31,6 +31,10 @@ func RequirePermission(secret []byte, perm string) echo.MiddlewareFunc {
 				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			}
 			if !claims.Has(perm) {
+				c.Set(ClaimsContextKey, claims)
+				if onDenied != nil {
+					onDenied(c, perm)
+				}
 				return c.JSON(http.StatusForbidden, map[string]string{"error": "forbidden: missing permission " + perm})
 			}
 			c.Set(ClaimsContextKey, claims)

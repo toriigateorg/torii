@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/labstack/echo/v5"
 
+	"sanmon/internal/audit"
 	"sanmon/internal/db"
 )
 
@@ -173,6 +174,14 @@ func (h *authHandlers) adminCreateSSO(c *echo.Context) error {
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not create provider"})
 	}
+	pid := p.ID
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:  audit.EventSSOProviderCreated,
+		TargetType: audit.TargetSSOProvider,
+		TargetID:   &pid,
+		TargetName: p.Slug,
+		Metadata:   map[string]any{"after": audit.SnapshotSSOProvider(p)},
+	})
 	return c.JSON(http.StatusCreated, toSSOProviderDTO(p))
 }
 
@@ -215,6 +224,7 @@ func (h *authHandlers) adminUpdateSSO(c *echo.Context) error {
 		linkByEmail = *req.LinkByEmail
 	}
 
+	before := audit.SnapshotSSOProvider(existing)
 	p, err := h.q.UpdateSSOProvider(ctx, db.UpdateSSOProviderParams{
 		ID:           id,
 		Slug:         req.Slug,
@@ -234,6 +244,14 @@ func (h *authHandlers) adminUpdateSSO(c *echo.Context) error {
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not update provider"})
 	}
+	pid := p.ID
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:  audit.EventSSOProviderUpdated,
+		TargetType: audit.TargetSSOProvider,
+		TargetID:   &pid,
+		TargetName: p.Slug,
+		Metadata:   map[string]any{"before": before, "after": audit.SnapshotSSOProvider(p)},
+	})
 	return c.JSON(http.StatusOK, toSSOProviderDTO(p))
 }
 
@@ -242,8 +260,18 @@ func (h *authHandlers) adminDeleteSSO(c *echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid id"})
 	}
-	if err := h.q.DeleteSSOProvider(c.Request().Context(), id); err != nil {
+	ctx := c.Request().Context()
+	prev, _ := h.q.GetSSOProviderByID(ctx, id)
+	if err := h.q.DeleteSSOProvider(ctx, id); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not delete provider"})
 	}
+	pid := id
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:  audit.EventSSOProviderDeleted,
+		TargetType: audit.TargetSSOProvider,
+		TargetID:   &pid,
+		TargetName: prev.Slug,
+		Metadata:   map[string]any{"before": audit.SnapshotSSOProvider(prev)},
+	})
 	return c.NoContent(http.StatusNoContent)
 }

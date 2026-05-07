@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
+	"sanmon/internal/audit"
 	"sanmon/internal/db"
 )
 
@@ -47,7 +48,8 @@ func (h *authHandlers) adminAssignUserRole(c *echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid role_id"})
 	}
 	ctx := c.Request().Context()
-	if _, err := h.q.GetUserByID(ctx, userID); err != nil {
+	user, err := h.q.GetUserByID(ctx, userID)
+	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "user not found"})
 	}
 	role, err := h.q.GetRoleByID(ctx, roleID)
@@ -60,6 +62,17 @@ func (h *authHandlers) adminAssignUserRole(c *echo.Context) error {
 	if err := h.q.AssignUserRole(ctx, db.AssignUserRoleParams{UserID: userID, RoleID: roleID}); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not assign role"})
 	}
+	uid := user.ID
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:  audit.EventUserRoleAssigned,
+		TargetType: audit.TargetUser,
+		TargetID:   &uid,
+		TargetName: user.Username,
+		Metadata: map[string]any{
+			"role_id":   role.ID.String(),
+			"role_name": role.Name,
+		},
+	})
 	return c.NoContent(http.StatusCreated)
 }
 
@@ -89,8 +102,20 @@ func (h *authHandlers) adminRevokeUserRole(c *echo.Context) error {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "cannot revoke admin from the sole admin user"})
 		}
 	}
+	user, _ := h.q.GetUserByID(ctx, userID)
 	if err := h.q.RevokeUserRole(ctx, db.RevokeUserRoleParams{UserID: userID, RoleID: roleID}); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not revoke role"})
 	}
+	uid := userID
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:  audit.EventUserRoleRevoked,
+		TargetType: audit.TargetUser,
+		TargetID:   &uid,
+		TargetName: user.Username,
+		Metadata: map[string]any{
+			"role_id":   role.ID.String(),
+			"role_name": role.Name,
+		},
+	})
 	return c.NoContent(http.StatusNoContent)
 }

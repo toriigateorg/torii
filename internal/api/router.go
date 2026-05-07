@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v5"
 
+	"sanmon/internal/audit"
 	"sanmon/internal/auth"
 	"sanmon/internal/config"
 	"sanmon/internal/db"
@@ -15,7 +16,7 @@ import (
 )
 
 // Register mounts the /api/v1 routes on the given echo instance.
-func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy.ServiceCache) {
+func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logger) {
 	v1 := e.Group("/api/v1")
 
 	v1.GET("/health", func(c *echo.Context) error {
@@ -42,7 +43,7 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 		return
 	}
 
-	h := &authHandlers{pool: pool, q: db.New(pool), cfg: cfg, cache: cache}
+	h := &authHandlers{pool: pool, q: db.New(pool), cfg: cfg, cache: cache, auditor: auditor}
 
 	v1.POST("/signup", h.signup)
 	v1.POST("/signin", h.signin)
@@ -51,7 +52,20 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	v1.GET("/me", h.me, auth.RequireUser(cfg.JWTSecret))
 
 	secret := cfg.JWTSecret
-	gate := func(perm string) echo.MiddlewareFunc { return auth.RequirePermission(secret, perm) }
+	onDenied := func(c *echo.Context, perm string) {
+		if auditor == nil {
+			return
+		}
+		auditor.LogFromEcho(c, audit.Event{
+			EventType: audit.EventAuthzDenied,
+			Metadata: map[string]any{
+				"required_permission": perm,
+				"path":                c.Request().URL.Path,
+				"method":              c.Request().Method,
+			},
+		})
+	}
+	gate := func(perm string) echo.MiddlewareFunc { return auth.RequirePermission(secret, perm, onDenied) }
 
 	v1.GET("/admin/users", h.adminListUsers, gate(auth.PermUsersRead))
 	v1.POST("/admin/users", h.adminCreateUser, gate(auth.PermUsersCreate))
@@ -90,6 +104,8 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 
 	v1.GET("/admin/settings", h.adminGetSettings, gate(auth.PermSettingsRead))
 	v1.PUT("/admin/settings", h.adminUpdateSettings, gate(auth.PermSettingsUpdate))
+
+	v1.GET("/admin/audit", h.adminListAuditLogs, gate(auth.PermAuditRead))
 
 	v1.GET("/auth/config", h.publicAuthConfig)
 	v1.GET("/auth/providers", h.publicListProviders)

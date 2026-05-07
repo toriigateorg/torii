@@ -107,6 +107,7 @@ docker-compose.prod.yml      prod (named volume, healthcheck, APP_ENV=production
 | `API_HOST` | `0.0.0.0` | |
 | `API_PORT` | `1356` | |
 | `SANMON_URL` | *(required)* | host[:port] sanmon itself answers on. Requests with this `Host` header serve the SPA; other hosts go through the reverse-proxy. Dev value: `localhost:1356`. Also exposed to the SPA via `runtimeConfig.public.sanmonUrl`. |
+| `AUDIT_LOG_DIR` | `./logs` | directory for the JSON-lines audit trail (`audit.jsonl`); auto-created. Mount a volume here in prod (compose mounts `audit-logs` → `/app/logs`). |
 
 Loaded by `godotenv.Load()` in `server.go` from `.env`/`.app.env`.
 
@@ -133,6 +134,11 @@ Add a migration:
 ```
 # create files manually as migrations/NNNN_name.{up,down}.sql
 sanmon migrate up        # via docker: docker compose run --rm app sanmon migrate up
+```
+
+Prune audit logs:
+```
+sanmon audit prune --days 90
 ```
 
 Add a shadcn-vue component (in `client/`):

@@ -13,6 +13,7 @@ type Config struct {
 	AccessTokenTTL  time.Duration
 	RefreshTokenTTL time.Duration
 	SanmonURL       string
+	AuditLogDir     string
 }
 
 func Load() (*Config, error) {
@@ -31,12 +32,18 @@ func Load() (*Config, error) {
 		return nil, errors.New("SANMON_URL is required")
 	}
 
+	auditDir := os.Getenv("AUDIT_LOG_DIR")
+	if auditDir == "" {
+		auditDir = "./logs"
+	}
+
 	return &Config{
 		AppEnv:          env,
 		JWTSecret:       []byte(secret),
 		AccessTokenTTL:  time.Duration(intEnv("ACCESS_TOKEN_EXPIRY_MINS", 5)) * time.Minute,
 		RefreshTokenTTL: time.Duration(intEnv("REFRESH_TOKEN_EXPIRY_DAYS", 7)) * 24 * time.Hour,
 		SanmonURL:       sanmonURL,
+		AuditLogDir:     auditDir,
 	}, nil
 }
 

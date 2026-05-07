@@ -20,6 +20,7 @@ func main() {
 		Commands: []*cli.Command{
 			cmd.Serve(),
 			cmd.Migrate(),
+			cmd.Audit(),
 		},
 	}
 

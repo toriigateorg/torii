@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/labstack/echo/v5"
 
+	"sanmon/internal/audit"
 	"sanmon/internal/auth"
 	"sanmon/internal/db"
 )
@@ -161,6 +162,16 @@ func (h *authHandlers) adminCreateRole(c *echo.Context) error {
 	if err := tx.Commit(ctx); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	}
+	rid := role.ID
+	after := audit.SnapshotRole(role)
+	after["permissions"] = req.Permissions
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:  audit.EventRoleCreated,
+		TargetType: audit.TargetRole,
+		TargetID:   &rid,
+		TargetName: role.Name,
+		Metadata:   map[string]any{"after": after},
+	})
 	dto, err := h.toRoleDTO(c.Request().Context(), role)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
@@ -203,6 +214,7 @@ func (h *authHandlers) adminUpdateRole(c *echo.Context) error {
 		}
 		newDesc = d
 	}
+	before := audit.SnapshotRole(role)
 	updated, err := h.q.UpdateRole(ctx, db.UpdateRoleParams{ID: id, Name: newName, Description: newDesc})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -211,6 +223,14 @@ func (h *authHandlers) adminUpdateRole(c *echo.Context) error {
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not update role"})
 	}
+	rid := updated.ID
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:  audit.EventRoleUpdated,
+		TargetType: audit.TargetRole,
+		TargetID:   &rid,
+		TargetName: updated.Name,
+		Metadata:   map[string]any{"before": before, "after": audit.SnapshotRole(updated)},
+	})
 	dto, err := h.toRoleDTO(c.Request().Context(), updated)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
@@ -234,12 +254,21 @@ func (h *authHandlers) adminDeleteRole(c *echo.Context) error {
 	if role.IsSystem {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "cannot delete a system role"})
 	}
+	before := audit.SnapshotRole(role)
 	if err := h.q.DeleteRole(ctx, id); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not delete role"})
 	}
 	if h.cache != nil {
 		h.cache.Invalidate()
 	}
+	rid := role.ID
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:  audit.EventRoleDeleted,
+		TargetType: audit.TargetRole,
+		TargetID:   &rid,
+		TargetName: role.Name,
+		Metadata:   map[string]any{"before": before},
+	})
 	return c.NoContent(http.StatusNoContent)
 }
 
@@ -281,6 +310,11 @@ func (h *authHandlers) adminSetRolePermissions(c *echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "cannot edit permissions on the admin role"})
 	}
 
+	beforePerms, _ := h.q.ListRolePermissions(ctx, id)
+	if beforePerms == nil {
+		beforePerms = []string{}
+	}
+
 	tx, err := h.pool.Begin(ctx)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
@@ -304,6 +338,14 @@ func (h *authHandlers) adminSetRolePermissions(c *echo.Context) error {
 	if out == nil {
 		out = []string{}
 	}
+	rid := id
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:  audit.EventRolePermsChanged,
+		TargetType: audit.TargetRole,
+		TargetID:   &rid,
+		TargetName: role.Name,
+		Metadata:   map[string]any{"before": beforePerms, "after": out},
+	})
 	return c.JSON(http.StatusOK, map[string][]string{"permissions": out})
 }
 
@@ -337,10 +379,12 @@ func (h *authHandlers) adminAssignRoleService(c *echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid service_id"})
 	}
 	ctx := c.Request().Context()
-	if _, err := h.q.GetRoleByID(ctx, roleID); err != nil {
+	role, err := h.q.GetRoleByID(ctx, roleID)
+	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "role not found"})
 	}
-	if _, err := h.q.GetServiceByID(ctx, svcID); err != nil {
+	svc, err := h.q.GetServiceByID(ctx, svcID)
+	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "service not found"})
 	}
 	if err := h.q.AssignRoleService(ctx, db.AssignRoleServiceParams{RoleID: roleID, ServiceID: svcID}); err != nil {
@@ -349,6 +393,17 @@ func (h *authHandlers) adminAssignRoleService(c *echo.Context) error {
 	if h.cache != nil {
 		h.cache.Invalidate()
 	}
+	rid := roleID
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:  audit.EventRoleServiceAssigned,
+		TargetType: audit.TargetRole,
+		TargetID:   &rid,
+		TargetName: role.Name,
+		Metadata: map[string]any{
+			"service_id":    svc.ID.String(),
+			"service_title": svc.Title,
+		},
+	})
 	return c.NoContent(http.StatusCreated)
 }
 
@@ -361,12 +416,26 @@ func (h *authHandlers) adminRevokeRoleService(c *echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid service id"})
 	}
-	if err := h.q.RevokeRoleService(c.Request().Context(), db.RevokeRoleServiceParams{RoleID: roleID, ServiceID: svcID}); err != nil {
+	ctx := c.Request().Context()
+	role, _ := h.q.GetRoleByID(ctx, roleID)
+	svc, _ := h.q.GetServiceByID(ctx, svcID)
+	if err := h.q.RevokeRoleService(ctx, db.RevokeRoleServiceParams{RoleID: roleID, ServiceID: svcID}); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not revoke service"})
 	}
 	if h.cache != nil {
 		h.cache.Invalidate()
 	}
+	rid := roleID
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:  audit.EventRoleServiceRevoked,
+		TargetType: audit.TargetRole,
+		TargetID:   &rid,
+		TargetName: role.Name,
+		Metadata: map[string]any{
+			"service_id":    svc.ID.String(),
+			"service_title": svc.Title,
+		},
+	})
 	return c.NoContent(http.StatusNoContent)
 }
 

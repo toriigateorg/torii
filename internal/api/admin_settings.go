@@ -6,6 +6,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"sanmon/internal/audit"
 	"sanmon/internal/db"
 )
 
@@ -50,6 +51,7 @@ func (h *authHandlers) adminUpdateSettings(c *echo.Context) error {
 	}
 	ctx := c.Request().Context()
 	if req.SignupEnabled != nil {
+		before := h.getBoolSetting(ctx, settingSignupEnabled, true)
 		val := "false"
 		if *req.SignupEnabled {
 			val = "true"
@@ -57,6 +59,16 @@ func (h *authHandlers) adminUpdateSettings(c *echo.Context) error {
 		if _, err := h.q.UpsertSetting(ctx, db.UpsertSettingParams{Key: settingSignupEnabled, Value: val}); err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not update settings"})
 		}
+		h.auditor.LogFromEcho(c, audit.Event{
+			EventType:  audit.EventSettingsUpdated,
+			TargetType: audit.TargetSetting,
+			TargetName: settingSignupEnabled,
+			Metadata: map[string]any{
+				"key":    settingSignupEnabled,
+				"before": before,
+				"after":  *req.SignupEnabled,
+			},
+		})
 	}
 	return c.JSON(http.StatusOK, h.currentSettings(ctx))
 }

@@ -14,6 +14,7 @@ import (
 
 type CachedService struct {
 	ID      uuid.UUID
+	Title   string
 	Domain  string
 	Target  *url.URL
 	Headers map[string]string
@@ -97,6 +98,7 @@ func (c *ServiceCache) refreshLocked(ctx context.Context) {
 		}
 		next[r.Domain] = &CachedService{
 			ID:      r.ID,
+			Title:   r.Title,
 			Domain:  r.Domain,
 			Target:  target,
 			Headers: headers,

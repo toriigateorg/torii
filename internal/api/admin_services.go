@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/labstack/echo/v5"
 
+	"sanmon/internal/audit"
 	"sanmon/internal/db"
 )
 
@@ -143,6 +144,14 @@ func (h *authHandlers) adminCreateService(c *echo.Context) error {
 	if h.cache != nil {
 		h.cache.Invalidate()
 	}
+	sid := svc.ID
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:  audit.EventServiceCreated,
+		TargetType: audit.TargetService,
+		TargetID:   &sid,
+		TargetName: svc.Title,
+		Metadata:   map[string]any{"after": audit.SnapshotService(svc)},
+	})
 	return c.JSON(http.StatusCreated, toServiceDTO(svc))
 }
 
@@ -160,7 +169,9 @@ func (h *authHandlers) adminUpdateService(c *echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
 	}
 
-	svc, err := h.q.UpdateService(c.Request().Context(), db.UpdateServiceParams{
+	ctx := c.Request().Context()
+	prev, _ := h.q.GetServiceByID(ctx, id)
+	svc, err := h.q.UpdateService(ctx, db.UpdateServiceParams{
 		ID:          id,
 		Title:       req.Title,
 		Description: req.Description,
@@ -178,6 +189,14 @@ func (h *authHandlers) adminUpdateService(c *echo.Context) error {
 	if h.cache != nil {
 		h.cache.Invalidate()
 	}
+	sid := svc.ID
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:  audit.EventServiceUpdated,
+		TargetType: audit.TargetService,
+		TargetID:   &sid,
+		TargetName: svc.Title,
+		Metadata:   map[string]any{"before": audit.SnapshotService(prev), "after": audit.SnapshotService(svc)},
+	})
 	return c.JSON(http.StatusOK, toServiceDTO(svc))
 }
 
@@ -186,11 +205,21 @@ func (h *authHandlers) adminDeleteService(c *echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid id"})
 	}
-	if err := h.q.DeleteService(c.Request().Context(), id); err != nil {
+	ctx := c.Request().Context()
+	prev, _ := h.q.GetServiceByID(ctx, id)
+	if err := h.q.DeleteService(ctx, id); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not delete service"})
 	}
 	if h.cache != nil {
 		h.cache.Invalidate()
 	}
+	sid := id
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:  audit.EventServiceDeleted,
+		TargetType: audit.TargetService,
+		TargetID:   &sid,
+		TargetName: prev.Title,
+		Metadata:   map[string]any{"before": audit.SnapshotService(prev)},
+	})
 	return c.NoContent(http.StatusNoContent)
 }

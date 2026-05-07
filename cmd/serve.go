@@ -22,6 +22,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"sanmon/internal/api"
+	"sanmon/internal/audit"
 	"sanmon/internal/auth"
 	"sanmon/internal/config"
 	"sanmon/internal/db"
@@ -161,7 +162,18 @@ func runInner(ctx context.Context, host string, port int) error {
 		cache = proxy.NewServiceCache(db.New(pool), 30*time.Second)
 	}
 
-	api.Register(e, pool, cfg, cache)
+	var auditor *audit.Logger
+	if pool != nil && cfg != nil {
+		a, err := audit.New(db.New(pool), cfg.AuditLogDir)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "[audit] disabled:", err)
+		} else {
+			auditor = a
+			defer auditor.Close()
+		}
+	}
+
+	api.Register(e, pool, cfg, cache, auditor)
 
 	var spaHandler echo.HandlerFunc
 	if prod {
@@ -174,7 +186,7 @@ func runInner(ctx context.Context, host string, port int) error {
 		go waitForNuxt("127.0.0.1:3000", 10*time.Second)
 	}
 
-	e.Any("/*", dispatch(cfg, cache, spaHandler))
+	e.Any("/*", dispatch(cfg, cache, auditor, spaHandler))
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", host, port),
@@ -301,7 +313,7 @@ func pipePrefixed(wg *sync.WaitGroup, r io.Reader, prefix string) {
 // configured service.domain are reverse-proxied (when the caller carries a
 // valid sanmon access token); everything else falls through to the SPA so the
 // signin page or 4xx page can render under the unknown domain.
-func dispatch(cfg *config.Config, cache *proxy.ServiceCache, spa echo.HandlerFunc) echo.HandlerFunc {
+func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logger, spa echo.HandlerFunc) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		// Never let the SPA handler answer a request that was meant for the
 		// API but didn't match a registered route — that would return an
@@ -320,6 +332,20 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, spa echo.HandlerFun
 			if svc, ok := cache.Lookup(c.Request().Context(), host); ok {
 				claims, err := auth.ClaimsFromRequest(c, cfg.JWTSecret)
 				if err != nil {
+					if auditor != nil {
+						svcID := svc.ID
+						auditor.LogFromEcho(c, audit.Event{
+							EventType:  audit.EventProxyDenied,
+							TargetType: audit.TargetService,
+							TargetID:   &svcID,
+							TargetName: svc.Title,
+							Metadata: map[string]any{
+								"reason": "unauthenticated",
+								"host":   host,
+								"path":   c.Request().URL.Path,
+							},
+						})
+					}
 					return spa(c)
 				}
 				roleIDs := make([]uuid.UUID, 0, len(claims.RoleIDs))
@@ -329,7 +355,32 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, spa echo.HandlerFun
 					}
 				}
 				if !svc.AllowsAnyRole(roleIDs) {
+					if auditor != nil {
+						svcID := svc.ID
+						var actorID *uuid.UUID
+						if id, perr := uuid.Parse(claims.Subject); perr == nil {
+							actorID = &id
+						}
+						auditor.LogFromEcho(c, audit.Event{
+							EventType:     audit.EventProxyDenied,
+							ActorUserID:   actorID,
+							ActorUsername: claims.Username,
+							TargetType:    audit.TargetService,
+							TargetID:      &svcID,
+							TargetName:    svc.Title,
+							Metadata: map[string]any{
+								"reason": "no_role",
+								"host":   host,
+								"path":   c.Request().URL.Path,
+							},
+						})
+					}
 					return c.JSON(http.StatusForbidden, map[string]string{"error": "forbidden: no role grants access to this service"})
+				}
+				if auditor != nil {
+					if uid, perr := uuid.Parse(claims.Subject); perr == nil {
+						auditor.LogProxyAccess(c, uid, claims.Username, svc.ID, svc.Title)
+					}
 				}
 				return proxy.ProxyTo(svc, c)
 			}

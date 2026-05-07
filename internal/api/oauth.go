@@ -19,6 +19,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"golang.org/x/oauth2"
 
+	"sanmon/internal/audit"
 	"sanmon/internal/db"
 )
 
@@ -250,26 +251,50 @@ func (h *authHandlers) oauthCallback(c *echo.Context) error {
 	}
 	email := strings.ToLower(strings.TrimSpace(claims.Email))
 
-	user, err := h.findOrCreateSSOUser(ctx, p, claims, email)
+	user, outcome, err := h.findOrCreateSSOUser(ctx, p, claims, email)
 	if err != nil {
-		return c.Redirect(http.StatusFound, "/signin?error="+err.Error())
+		h.auditor.LogFromEcho(c, audit.Event{
+			EventType: audit.EventSigninFailed,
+			Metadata: map[string]any{
+				"identifier": email,
+				"reason":     "sso_" + err.Error(),
+				"provider":   p.Slug,
+			},
+		})
+		return c.Redirect(http.StatusFound, "/signin?error=sso_"+err.Error())
 	}
 
 	if _, _, _, err := h.issueSession(ctx, c, user); err != nil {
 		return c.Redirect(http.StatusFound, "/signin?error=sso_internal")
 	}
+	uid := user.ID
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:     audit.EventSigninSSO,
+		ActorUserID:   &uid,
+		ActorUsername: user.Username,
+		TargetType:    audit.TargetUser,
+		TargetID:      &uid,
+		TargetName:    user.Username,
+		Metadata: map[string]any{
+			"provider":       p.Slug,
+			"provider_name":  p.Name,
+			"outcome":        outcome,
+			"email":          email,
+			"email_verified": claims.EmailVerified,
+		},
+	})
 	return c.Redirect(http.StatusFound, "/dashboard")
 }
 
-func (h *authHandlers) findOrCreateSSOUser(ctx context.Context, p db.SsoProvider, claims oidcUserClaims, email string) (db.User, error) {
+func (h *authHandlers) findOrCreateSSOUser(ctx context.Context, p db.SsoProvider, claims oidcUserClaims, email string) (db.User, string, error) {
 	if ident, err := h.q.GetUserIdentity(ctx, db.GetUserIdentityParams{ProviderID: p.ID, Subject: claims.Sub}); err == nil {
 		user, err := h.q.GetUserByID(ctx, ident.UserID)
 		if err != nil {
-			return db.User{}, errors.New("sso_internal")
+			return db.User{}, "", errors.New("internal")
 		}
-		return user, nil
+		return user, "existing_identity", nil
 	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return db.User{}, errors.New("sso_internal")
+		return db.User{}, "", errors.New("internal")
 	}
 
 	if p.LinkByEmail && claims.EmailVerified && email != "" {
@@ -278,24 +303,24 @@ func (h *authHandlers) findOrCreateSSOUser(ctx context.Context, p db.SsoProvider
 			if _, err := h.q.CreateUserIdentity(ctx, db.CreateUserIdentityParams{
 				ProviderID: p.ID, Subject: claims.Sub, UserID: user.ID, Email: email,
 			}); err != nil {
-				return db.User{}, errors.New("sso_internal")
+				return db.User{}, "", errors.New("internal")
 			}
-			return user, nil
+			return user, "linked_by_email", nil
 		} else if !errors.Is(err, pgx.ErrNoRows) {
-			return db.User{}, errors.New("sso_internal")
+			return db.User{}, "", errors.New("internal")
 		}
 	}
 
 	if !p.AllowSignup {
-		return db.User{}, errors.New("sso_no_account")
+		return db.User{}, "", errors.New("no_account")
 	}
 	if email == "" {
-		return db.User{}, errors.New("sso_no_email")
+		return db.User{}, "", errors.New("no_email")
 	}
 
 	tx, err := h.pool.Begin(ctx)
 	if err != nil {
-		return db.User{}, errors.New("sso_internal")
+		return db.User{}, "", errors.New("internal")
 	}
 	defer tx.Rollback(ctx)
 	qtx := h.q.WithTx(tx)
@@ -324,27 +349,27 @@ func (h *authHandlers) findOrCreateSSOUser(ctx context.Context, p db.SsoProvider
 			}
 			continue
 		}
-		return db.User{}, errors.New("sso_internal")
+		return db.User{}, "", errors.New("internal")
 	}
 	if user.ID == uuid.Nil {
-		return db.User{}, errors.New("sso_internal")
+		return db.User{}, "", errors.New("internal")
 	}
 
 	allRole, err := qtx.GetRoleByName(ctx, "all")
 	if err != nil {
-		return db.User{}, errors.New("sso_internal")
+		return db.User{}, "", errors.New("internal")
 	}
 	if err := qtx.AssignUserRole(ctx, db.AssignUserRoleParams{UserID: user.ID, RoleID: allRole.ID}); err != nil {
-		return db.User{}, errors.New("sso_internal")
+		return db.User{}, "", errors.New("internal")
 	}
 	if _, err := qtx.CreateUserIdentity(ctx, db.CreateUserIdentityParams{
 		ProviderID: p.ID, Subject: claims.Sub, UserID: user.ID, Email: email,
 	}); err != nil {
-		return db.User{}, errors.New("sso_internal")
+		return db.User{}, "", errors.New("internal")
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return db.User{}, errors.New("sso_internal")
+		return db.User{}, "", errors.New("internal")
 	}
-	return user, nil
+	return user, "created", nil
 }
 
