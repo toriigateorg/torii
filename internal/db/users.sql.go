@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const countUsers = `-- name: CountUsers :one
@@ -33,7 +34,7 @@ type CreateUserParams struct {
 	Email        string
 	FirstName    string
 	LastName     string
-	PasswordHash string
+	PasswordHash pgtype.Text
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {

@@ -28,6 +28,11 @@ const (
 	PermTokensDelete = "tokens.delete"
 
 	PermPermissionsRead = "permissions.read"
+
+	PermSSOCreate = "sso.create"
+	PermSSORead   = "sso.read"
+	PermSSOUpdate = "sso.update"
+	PermSSODelete = "sso.delete"
 )
 
 var AllPermissions = []string{
@@ -38,6 +43,7 @@ var AllPermissions = []string{
 	PermServicesCreate, PermServicesRead, PermServicesUpdate, PermServicesDelete,
 	PermTokensRead, PermTokensDelete,
 	PermPermissionsRead,
+	PermSSOCreate, PermSSORead, PermSSOUpdate, PermSSODelete,
 }
 
 var permissionSet = func() map[string]struct{} {

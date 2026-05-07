@@ -84,6 +84,37 @@ export interface UpdateRolePayload {
   description?: string
 }
 
+export interface SSOProvider {
+  id: string
+  slug: string
+  name: string
+  issuer_url: string
+  client_id: string
+  has_secret: boolean
+  scopes: string
+  enabled: boolean
+  allow_signup: boolean
+  link_by_email: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface SSOProviderListResponse extends PageMeta {
+  items: SSOProvider[]
+}
+
+export interface SSOProviderPayload {
+  slug: string
+  name: string
+  issuer_url: string
+  client_id: string
+  client_secret?: string
+  scopes: string
+  enabled: boolean
+  allow_signup: boolean
+  link_by_email: boolean
+}
+
 export function useAdminApi() {
   const { authHeaders } = useAuth()
 
@@ -232,6 +263,32 @@ export function useAdminApi() {
     },
     listPermissions() {
       return $fetch<{ items: string[] }>("/api/v1/admin/permissions", opts())
+    },
+    listSSO(page: number, pageSize = 20) {
+      return $fetch<SSOProviderListResponse>("/api/v1/admin/sso", {
+        ...opts(),
+        query: { page, page_size: pageSize },
+      })
+    },
+    createSSO(payload: SSOProviderPayload) {
+      return $fetch<SSOProvider>("/api/v1/admin/sso", {
+        ...opts(),
+        method: "POST",
+        body: payload,
+      })
+    },
+    updateSSO(id: string, payload: SSOProviderPayload) {
+      return $fetch<SSOProvider>(`/api/v1/admin/sso/${id}`, {
+        ...opts(),
+        method: "PATCH",
+        body: payload,
+      })
+    },
+    deleteSSO(id: string) {
+      return $fetch(`/api/v1/admin/sso/${id}`, {
+        ...opts(),
+        method: "DELETE",
+      })
     },
   }
 }

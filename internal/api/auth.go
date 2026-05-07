@@ -134,7 +134,7 @@ func (h *authHandlers) signup(c *echo.Context) error {
 		Email:        req.Email,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
-		PasswordHash: hash,
+		PasswordHash: pgtype.Text{String: hash, Valid: true},
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -186,7 +186,7 @@ func (h *authHandlers) signin(c *echo.Context) error {
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	}
-	if !auth.VerifyPassword(user.PasswordHash, req.Password) {
+	if !user.PasswordHash.Valid || !auth.VerifyPassword(user.PasswordHash.String, req.Password) {
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 	}
 	return h.issueAndRespond(c, user)
@@ -276,34 +276,40 @@ func (h *authHandlers) loadUserAuthz(ctx context.Context, userID uuid.UUID) ([]r
 	return roles, perms, roleIDs, nil
 }
 
-func (h *authHandlers) issueAndRespond(c *echo.Context, user db.User) error {
-	ctx := c.Request().Context()
+func (h *authHandlers) issueSession(ctx context.Context, c *echo.Context, user db.User) (string, []roleSummary, []string, error) {
 	secure := h.cfg.IsProd()
 
 	roles, perms, roleIDs, err := h.loadUserAuthz(ctx, user.ID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+		return "", nil, nil, err
 	}
 
 	access, _, err := auth.IssueAccessToken(user.ID, user.Username, perms, roleIDs, h.cfg.JWTSecret, h.cfg.AccessTokenTTL)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+		return "", nil, nil, err
 	}
 	raw, hash, err := auth.NewRefreshToken()
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+		return "", nil, nil, err
 	}
 	if _, err := h.q.CreateRefreshToken(ctx, db.CreateRefreshTokenParams{
 		UserID:    user.ID,
 		TokenHash: hash,
 		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(h.cfg.RefreshTokenTTL), Valid: true},
 	}); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+		return "", nil, nil, err
 	}
 
 	auth.SetAccessCookie(c, access, h.cfg.AccessTokenTTL, secure)
 	auth.SetRefreshCookie(c, raw, h.cfg.RefreshTokenTTL, secure)
+	return access, roles, perms, nil
+}
 
+func (h *authHandlers) issueAndRespond(c *echo.Context, user db.User) error {
+	access, roles, perms, err := h.issueSession(c.Request().Context(), c, user)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
 	dto := toDTO(user, roles, perms)
 	return c.JSON(http.StatusOK, tokenResp{
 		AccessToken: access,

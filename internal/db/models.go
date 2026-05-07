@@ -49,15 +49,38 @@ type Service struct {
 	UpdatedAt   pgtype.Timestamptz
 }
 
+type SsoProvider struct {
+	ID           uuid.UUID
+	Slug         string
+	Name         string
+	IssuerUrl    string
+	ClientID     string
+	ClientSecret string
+	Scopes       string
+	Enabled      bool
+	AllowSignup  bool
+	LinkByEmail  bool
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+}
+
 type User struct {
 	ID           uuid.UUID
 	Username     string
 	Email        string
 	FirstName    string
 	LastName     string
-	PasswordHash string
+	PasswordHash pgtype.Text
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
+}
+
+type UserIdentity struct {
+	ProviderID uuid.UUID
+	Subject    string
+	UserID     uuid.UUID
+	Email      string
+	CreatedAt  pgtype.Timestamptz
 }
 
 type UserRole struct {

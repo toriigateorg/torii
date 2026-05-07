@@ -1,16 +1,45 @@
 <script setup lang="ts">
-import { LogIn } from "lucide-vue-next"
-
 definePageMeta({ middleware: "guest" })
 
 useHead({ title: "Sign in — sanmon" })
 
 const { signin } = useAuth()
+const route = useRoute()
+
+interface PublicProvider { slug: string; name: string }
 
 const identifier = ref("")
 const password = ref("")
 const error = ref<string | null>(null)
 const loading = ref(false)
+const providers = ref<PublicProvider[]>([])
+
+const ssoErrorMessages: Record<string, string> = {
+  sso_no_account: "No matching sanmon account for that identity.",
+  sso_no_email: "Provider did not share an email address.",
+  sso_state: "Sign-in session expired. Please try again.",
+  sso_denied: "Sign-in was cancelled at the provider.",
+  sso_unknown: "That SSO provider is no longer available.",
+  sso_discovery: "Could not reach the SSO provider.",
+  sso_exchange: "SSO token exchange failed.",
+  sso_verify: "SSO token could not be verified.",
+  sso_no_id_token: "Provider did not return an id_token.",
+  sso_claims: "Provider response was missing required claims.",
+  sso_internal: "Something went wrong during SSO sign-in.",
+}
+
+onMounted(async () => {
+  const code = route.query.error
+  if (typeof code === "string" && ssoErrorMessages[code]) {
+    error.value = ssoErrorMessages[code]
+  }
+  try {
+    const res = await $fetch<{ items: PublicProvider[] }>("/api/v1/auth/providers")
+    providers.value = res.items ?? []
+  } catch {
+    providers.value = []
+  }
+})
 
 async function onSubmit() {
   error.value = null
@@ -34,6 +63,15 @@ async function onSubmit() {
     loading.value = false
   }
 }
+
+function ssoSignin(slug: string) {
+  const sanmonHost = useRuntimeConfig().public.sanmonUrl
+  if (sanmonHost && window.location.host !== sanmonHost) {
+    window.location.assign(`${window.location.protocol}//${sanmonHost}/api/v1/oauth/${slug}/start`)
+    return
+  }
+  window.location.assign(`/api/v1/oauth/${slug}/start`)
+}
 </script>
 
 <template>
@@ -49,6 +87,27 @@ async function onSubmit() {
         <CardDescription>Sign in with your username or email.</CardDescription>
       </CardHeader>
       <CardContent>
+        <div v-if="providers.length" class="flex flex-col gap-2 mb-6">
+          <Button
+            v-for="p in providers"
+            :key="p.slug"
+            type="button"
+            variant="outline"
+            class="w-full"
+            @click="ssoSignin(p.slug)"
+          >
+            Sign in with {{ p.name }}
+          </Button>
+          <div class="relative my-2">
+            <div class="absolute inset-0 flex items-center" aria-hidden="true">
+              <span class="w-full border-t border-border" />
+            </div>
+            <div class="relative flex justify-center text-xs uppercase">
+              <span class="bg-card px-2 text-muted-foreground font-mono">or</span>
+            </div>
+          </div>
+        </div>
+
         <form class="flex flex-col gap-4" novalidate aria-describedby="signin-error" @submit.prevent="onSubmit">
           <div class="flex flex-col gap-1.5">
             <Label for="identifier">Username or email</Label>

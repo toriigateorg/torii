@@ -82,4 +82,13 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	v1.GET("/admin/roles/:id/users", h.adminListRoleUsers, gate(auth.PermRolesRead))
 
 	v1.GET("/admin/permissions", h.adminListPermissions, gate(auth.PermPermissionsRead))
+
+	v1.GET("/admin/sso", h.adminListSSO, gate(auth.PermSSORead))
+	v1.POST("/admin/sso", h.adminCreateSSO, gate(auth.PermSSOCreate))
+	v1.PATCH("/admin/sso/:id", h.adminUpdateSSO, gate(auth.PermSSOUpdate))
+	v1.DELETE("/admin/sso/:id", h.adminDeleteSSO, gate(auth.PermSSODelete))
+
+	v1.GET("/auth/providers", h.publicListProviders)
+	v1.GET("/oauth/:slug/start", h.oauthStart)
+	v1.GET("/oauth/:slug/callback", h.oauthCallback)
 }

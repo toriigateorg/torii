@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v5"
 
 	"sanmon/internal/auth"
@@ -97,7 +98,7 @@ func (h *authHandlers) adminCreateUser(c *echo.Context) error {
 		Email:        req.Email,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
-		PasswordHash: hash,
+		PasswordHash: pgtype.Text{String: hash, Valid: true},
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
