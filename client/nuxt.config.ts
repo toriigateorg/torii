@@ -20,6 +20,11 @@ export default defineNuxtConfig({
       meta: [
         { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" },
       ],
+      link: [
+        { rel: "icon", type: "image/svg+xml", href: "/sanmon-logo.svg" },
+        { rel: "alternate icon", type: "image/x-icon", href: "/favicon.ico" },
+        { rel: "apple-touch-icon", href: "/sanmon-logo.svg" },
+      ],
     },
   },
 

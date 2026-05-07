@@ -30,10 +30,14 @@ async function onSignout() {
     >
       <div class="mx-auto max-w-7xl flex h-14 items-center justify-between px-4 sm:px-6 lg:px-8">
         <NuxtLink to="/" class="flex items-center gap-2 group" aria-label="sanmon — home">
-          <div aria-hidden="true" class="relative size-7 rounded-md hairline overflow-hidden bg-gradient-to-br from-primary/15 to-transparent flex items-center justify-center">
-            <span class="font-mono text-[11px] font-semibold tracking-tight">sm</span>
-            <span class="absolute inset-0 ring-1 ring-inset ring-primary/10 rounded-md" />
-          </div>
+          <img
+            src="/sanmon-logo.svg"
+            alt=""
+            aria-hidden="true"
+            width="28"
+            height="28"
+            class="size-7 rounded-md"
+          />
           <span class="font-semibold tracking-tight">sanmon</span>
           <span class="text-mono-label hidden sm:inline ml-2">v0.1</span>
         </NuxtLink>

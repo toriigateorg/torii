@@ -41,7 +41,7 @@ async function onSubmit() {
     <Card class="hairline">
       <CardHeader>
         <div class="flex items-center gap-2 mb-1">
-          <LogIn class="size-4 text-primary" aria-hidden="true" />
+          <img src="/sanmon-logo.svg" alt="" aria-hidden="true" width="20" height="20" class="size-5" />
           <span class="text-mono-label">// signin</span>
         </div>
         <h1 class="sr-only">Sign in to sanmon</h1>
