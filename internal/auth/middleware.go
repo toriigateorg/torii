@@ -23,15 +23,15 @@ func RequireUser(secret []byte) echo.MiddlewareFunc {
 	}
 }
 
-func RequireAdmin(secret []byte) echo.MiddlewareFunc {
+func RequirePermission(secret []byte, perm string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			claims, err := authenticate(c, secret)
 			if err != nil {
 				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			}
-			if claims.UserType != "admin" {
-				return c.JSON(http.StatusForbidden, map[string]string{"error": "admin only"})
+			if !claims.Has(perm) {
+				return c.JSON(http.StatusForbidden, map[string]string{"error": "forbidden: missing permission " + perm})
 			}
 			c.Set(ClaimsContextKey, claims)
 			return next(c)
@@ -57,6 +57,10 @@ var errMissingToken = errors.New("missing token")
 func ValidAccessToken(c *echo.Context, secret []byte) bool {
 	_, err := authenticate(c, secret)
 	return err == nil
+}
+
+func ClaimsFromRequest(c *echo.Context, secret []byte) (*Claims, error) {
+	return authenticate(c, secret)
 }
 
 func ClaimsFrom(c *echo.Context) *Claims {

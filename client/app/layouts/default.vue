@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Menu, Github, Activity, LogIn, LogOut, LayoutDashboard, ShieldCheck } from "lucide-vue-next"
 
-const { isAuthed, user, signout } = useAuth()
+const { isAuthed, isAdmin, user, signout } = useAuth()
 
 const navLinks = computed(() => {
   const base = [
@@ -78,7 +78,7 @@ async function onSignout() {
                     <LayoutDashboard class="size-4 mr-2" aria-hidden="true" /> Dashboard
                   </NuxtLink>
                 </DropdownMenuItem>
-                <DropdownMenuItem v-if="user?.user_type === 'admin'" as-child>
+                <DropdownMenuItem v-if="isAdmin" as-child>
                   <NuxtLink to="/admin/model/users" class="cursor-pointer">
                     <ShieldCheck class="size-4 mr-2" aria-hidden="true" /> Admin
                   </NuxtLink>

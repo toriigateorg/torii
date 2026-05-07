@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { Users, KeyRound, Server } from "lucide-vue-next"
+import { Users, KeyRound, Server, Shield } from "lucide-vue-next"
 
 const route = useRoute()
 const links = [
   { to: "/admin/model/users", label: "Users", icon: Users },
+  { to: "/admin/model/roles", label: "Roles", icon: Shield },
   { to: "/admin/model/tokens", label: "Tokens", icon: KeyRound },
   { to: "/admin/model/services", label: "Services", icon: Server },
 ]

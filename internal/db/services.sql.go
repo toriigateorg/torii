@@ -107,39 +107,6 @@ func (q *Queries) GetServiceByID(ctx context.Context, id uuid.UUID) (Service, er
 	return i, err
 }
 
-const listAllServicesForCache = `-- name: ListAllServicesForCache :many
-SELECT id, title, description, service_url, domain, headers, created_at, updated_at FROM services
-`
-
-func (q *Queries) ListAllServicesForCache(ctx context.Context) ([]Service, error) {
-	rows, err := q.db.Query(ctx, listAllServicesForCache)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Service
-	for rows.Next() {
-		var i Service
-		if err := rows.Scan(
-			&i.ID,
-			&i.Title,
-			&i.Description,
-			&i.ServiceUrl,
-			&i.Domain,
-			&i.Headers,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listServices = `-- name: ListServices :many
 SELECT id, title, description, service_url, domain, headers, created_at, updated_at FROM services
 ORDER BY created_at ASC, id ASC

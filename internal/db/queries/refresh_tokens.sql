@@ -24,8 +24,7 @@ SELECT
     rt.created_at,
     rt.revoked_at,
     u.username,
-    u.email,
-    u.user_type
+    u.email
 FROM refresh_tokens rt
 JOIN users u ON u.id = rt.user_id
 ORDER BY rt.created_at DESC, rt.id ASC

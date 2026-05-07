@@ -14,9 +14,6 @@ SELECT * FROM services
 ORDER BY created_at ASC, id ASC
 LIMIT sqlc.arg('lim')::int OFFSET sqlc.arg('off')::int;
 
--- name: ListAllServicesForCache :many
-SELECT * FROM services;
-
 -- name: CountServices :one
 SELECT count(*) FROM services;
 

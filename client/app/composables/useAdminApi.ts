@@ -16,7 +16,6 @@ export interface CreateUserPayload {
   password: string
   first_name: string
   last_name: string
-  user_type: "admin" | "user"
 }
 
 export type TokenStatus = "active" | "revoked" | "expired"
@@ -26,7 +25,6 @@ export interface TokenSession {
   user_id: string
   username: string
   email: string
-  user_type: string
   created_at: string
   expires_at: string
   revoked_at: string | null
@@ -61,6 +59,31 @@ export interface ServicePayload {
   headers: Record<string, string>
 }
 
+export interface Role {
+  id: string
+  name: string
+  description: string
+  is_system: boolean
+  permissions: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface RoleListResponse extends PageMeta {
+  items: Role[]
+}
+
+export interface CreateRolePayload {
+  name: string
+  description: string
+  permissions: string[]
+}
+
+export interface UpdateRolePayload {
+  name?: string
+  description?: string
+}
+
 export function useAdminApi() {
   const { authHeaders } = useAuth()
 
@@ -85,6 +108,22 @@ export function useAdminApi() {
     },
     deleteUser(id: string) {
       return $fetch(`/api/v1/admin/users/${id}`, {
+        ...opts(),
+        method: "DELETE",
+      })
+    },
+    listUserRoles(userId: string) {
+      return $fetch<{ items: Role[] }>(`/api/v1/admin/users/${userId}/roles`, opts())
+    },
+    assignUserRole(userId: string, roleId: string) {
+      return $fetch(`/api/v1/admin/users/${userId}/roles`, {
+        ...opts(),
+        method: "POST",
+        body: { role_id: roleId },
+      })
+    },
+    revokeUserRole(userId: string, roleId: string) {
+      return $fetch(`/api/v1/admin/users/${userId}/roles/${roleId}`, {
         ...opts(),
         method: "DELETE",
       })
@@ -132,6 +171,67 @@ export function useAdminApi() {
         ...opts(),
         method: "DELETE",
       })
+    },
+    listRoles(page: number, pageSize = 20) {
+      return $fetch<RoleListResponse>("/api/v1/admin/roles", {
+        ...opts(),
+        query: { page, page_size: pageSize },
+      })
+    },
+    getRole(id: string) {
+      return $fetch<Role>(`/api/v1/admin/roles/${id}`, opts())
+    },
+    createRole(payload: CreateRolePayload) {
+      return $fetch<Role>("/api/v1/admin/roles", {
+        ...opts(),
+        method: "POST",
+        body: payload,
+      })
+    },
+    updateRole(id: string, payload: UpdateRolePayload) {
+      return $fetch<Role>(`/api/v1/admin/roles/${id}`, {
+        ...opts(),
+        method: "PATCH",
+        body: payload,
+      })
+    },
+    deleteRole(id: string) {
+      return $fetch(`/api/v1/admin/roles/${id}`, {
+        ...opts(),
+        method: "DELETE",
+      })
+    },
+    setRolePermissions(id: string, permissions: string[]) {
+      return $fetch<{ permissions: string[] }>(`/api/v1/admin/roles/${id}/permissions`, {
+        ...opts(),
+        method: "PUT",
+        body: { permissions },
+      })
+    },
+    listRoleServices(id: string) {
+      return $fetch<{ items: Service[] }>(`/api/v1/admin/roles/${id}/services`, opts())
+    },
+    assignRoleService(roleId: string, serviceId: string) {
+      return $fetch(`/api/v1/admin/roles/${roleId}/services`, {
+        ...opts(),
+        method: "POST",
+        body: { service_id: serviceId },
+      })
+    },
+    revokeRoleService(roleId: string, serviceId: string) {
+      return $fetch(`/api/v1/admin/roles/${roleId}/services/${serviceId}`, {
+        ...opts(),
+        method: "DELETE",
+      })
+    },
+    listRoleUsers(id: string, page: number, pageSize = 20) {
+      return $fetch<UserListResponse>(`/api/v1/admin/roles/${id}/users`, {
+        ...opts(),
+        query: { page, page_size: pageSize },
+      })
+    },
+    listPermissions() {
+      return $fetch<{ items: string[] }>("/api/v1/admin/permissions", opts())
     },
   }
 }

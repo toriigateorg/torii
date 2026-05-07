@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"regexp"
@@ -11,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v5"
 
 	"sanmon/internal/auth"
@@ -20,28 +22,42 @@ import (
 )
 
 type authHandlers struct {
+	pool  *pgxpool.Pool
 	q     *db.Queries
 	cfg   *config.Config
 	cache *proxy.ServiceCache
 }
 
-type userDTO struct {
-	ID        string `json:"id"`
-	Username  string `json:"username"`
-	Email     string `json:"email"`
-	FirstName string `json:"first_name"`
-	LastName  string `json:"last_name"`
-	UserType  string `json:"user_type"`
+type roleSummary struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
-func toDTO(u db.User) userDTO {
+type userDTO struct {
+	ID          string        `json:"id"`
+	Username    string        `json:"username"`
+	Email       string        `json:"email"`
+	FirstName   string        `json:"first_name"`
+	LastName    string        `json:"last_name"`
+	Roles       []roleSummary `json:"roles"`
+	Permissions []string      `json:"permissions"`
+}
+
+func toDTO(u db.User, roles []roleSummary, perms []string) userDTO {
+	if roles == nil {
+		roles = []roleSummary{}
+	}
+	if perms == nil {
+		perms = []string{}
+	}
 	return userDTO{
-		ID:        u.ID.String(),
-		Username:  u.Username,
-		Email:     u.Email,
-		FirstName: u.FirstName,
-		LastName:  u.LastName,
-		UserType:  u.UserType,
+		ID:          u.ID.String(),
+		Username:    u.Username,
+		Email:       u.Email,
+		FirstName:   u.FirstName,
+		LastName:    u.LastName,
+		Roles:       roles,
+		Permissions: perms,
 	}
 }
 
@@ -99,18 +115,26 @@ func (h *authHandlers) signup(c *echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	userType := "user"
-	if count, err := h.q.CountUsers(ctx); err == nil && count == 0 {
-		userType = "admin"
+
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := h.q.WithTx(tx)
+
+	count, err := qtx.CountUsers(ctx)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	}
 
-	user, err := h.q.CreateUser(ctx, db.CreateUserParams{
+	user, err := qtx.CreateUser(ctx, db.CreateUserParams{
 		Username:     req.Username,
 		Email:        req.Email,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
 		PasswordHash: hash,
-		UserType:     userType,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -119,6 +143,29 @@ func (h *authHandlers) signup(c *echo.Context) error {
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not create user"})
 	}
+
+	allRole, err := qtx.GetRoleByName(ctx, "all")
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
+	if err := qtx.AssignUserRole(ctx, db.AssignUserRoleParams{UserID: user.ID, RoleID: allRole.ID}); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
+
+	if count == 0 {
+		adminRole, err := qtx.GetRoleByName(ctx, "admin")
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+		}
+		if err := qtx.AssignUserRole(ctx, db.AssignUserRoleParams{UserID: user.ID, RoleID: adminRole.ID}); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
+
 	return h.issueAndRespond(c, user)
 }
 
@@ -196,19 +243,49 @@ func (h *authHandlers) me(c *echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid subject"})
 	}
-	user, err := h.q.GetUserByID(c.Request().Context(), id)
+	ctx := c.Request().Context()
+	user, err := h.q.GetUserByID(ctx, id)
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "user not found"})
 	}
-	dto := toDTO(user)
-	return c.JSON(http.StatusOK, dto)
+	roles, perms, _, err := h.loadUserAuthz(ctx, id)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
+	return c.JSON(http.StatusOK, toDTO(user, roles, perms))
+}
+
+func (h *authHandlers) loadUserAuthz(ctx context.Context, userID uuid.UUID) ([]roleSummary, []string, []uuid.UUID, error) {
+	roleRows, err := h.q.ListUserRoles(ctx, userID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	roles := make([]roleSummary, 0, len(roleRows))
+	roleIDs := make([]uuid.UUID, 0, len(roleRows))
+	for _, r := range roleRows {
+		roles = append(roles, roleSummary{ID: r.ID.String(), Name: r.Name})
+		roleIDs = append(roleIDs, r.ID)
+	}
+	perms, err := h.q.GetUserPermissions(ctx, userID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if perms == nil {
+		perms = []string{}
+	}
+	return roles, perms, roleIDs, nil
 }
 
 func (h *authHandlers) issueAndRespond(c *echo.Context, user db.User) error {
 	ctx := c.Request().Context()
 	secure := h.cfg.IsProd()
 
-	access, _, err := auth.IssueAccessToken(user.ID, user.Username, user.UserType, h.cfg.JWTSecret, h.cfg.AccessTokenTTL)
+	roles, perms, roleIDs, err := h.loadUserAuthz(ctx, user.ID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
+
+	access, _, err := auth.IssueAccessToken(user.ID, user.Username, perms, roleIDs, h.cfg.JWTSecret, h.cfg.AccessTokenTTL)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	}
@@ -227,7 +304,7 @@ func (h *authHandlers) issueAndRespond(c *echo.Context, user db.User) error {
 	auth.SetAccessCookie(c, access, h.cfg.AccessTokenTTL, secure)
 	auth.SetRefreshCookie(c, raw, h.cfg.RefreshTokenTTL, secure)
 
-	dto := toDTO(user)
+	dto := toDTO(user, roles, perms)
 	return c.JSON(http.StatusOK, tokenResp{
 		AccessToken: access,
 		ExpiresIn:   int(h.cfg.AccessTokenTTL.Seconds()),

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -24,7 +25,6 @@ type adminCreateUserReq struct {
 	Password  string `json:"password"`
 	FirstName string `json:"first_name"`
 	LastName  string `json:"last_name"`
-	UserType  string `json:"user_type"`
 }
 
 func (h *authHandlers) adminListUsers(c *echo.Context) error {
@@ -42,7 +42,11 @@ func (h *authHandlers) adminListUsers(c *echo.Context) error {
 
 	items := make([]userDTO, 0, len(rows))
 	for _, u := range rows {
-		items = append(items, toDTO(u))
+		roles, perms, _, err := h.loadUserAuthz(ctx, u.ID)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not load roles"})
+		}
+		items = append(items, toDTO(u, roles, perms))
 	}
 	return c.JSON(http.StatusOK, adminUserListResp{
 		pageMeta: pageMeta{Page: page, PageSize: pageSize, Total: total},
@@ -59,16 +63,12 @@ func (h *authHandlers) adminCreateUser(c *echo.Context) error {
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	req.FirstName = strings.TrimSpace(req.FirstName)
 	req.LastName = strings.TrimSpace(req.LastName)
-	req.UserType = strings.TrimSpace(req.UserType)
 
 	if !usernameRe.MatchString(req.Username) {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "username must be 3-64 chars: letters, digits, _ . -"})
 	}
 	if !emailRe.MatchString(req.Email) {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid email"})
-	}
-	if req.UserType != "admin" && req.UserType != "user" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "user_type must be 'admin' or 'user'"})
 	}
 	if h.cfg.IsProd() {
 		if err := auth.ValidatePasswordStrength(req.Password); err != nil {
@@ -83,13 +83,21 @@ func (h *authHandlers) adminCreateUser(c *echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	}
 
-	user, err := h.q.CreateUser(c.Request().Context(), db.CreateUserParams{
+	ctx := c.Request().Context()
+
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.q.WithTx(tx)
+
+	user, err := qtx.CreateUser(ctx, db.CreateUserParams{
 		Username:     req.Username,
 		Email:        req.Email,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
 		PasswordHash: hash,
-		UserType:     req.UserType,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -98,8 +106,22 @@ func (h *authHandlers) adminCreateUser(c *echo.Context) error {
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not create user"})
 	}
-	dto := toDTO(user)
-	return c.JSON(http.StatusCreated, dto)
+	allRole, err := qtx.GetRoleByName(ctx, "all")
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
+	if err := qtx.AssignUserRole(ctx, db.AssignUserRoleParams{UserID: user.ID, RoleID: allRole.ID}); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
+
+	roles, perms, _, err := h.loadUserAuthz(ctx, user.ID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not load roles"})
+	}
+	return c.JSON(http.StatusCreated, toDTO(user, roles, perms))
 }
 
 func (h *authHandlers) adminDeleteUser(c *echo.Context) error {
@@ -111,8 +133,38 @@ func (h *authHandlers) adminDeleteUser(c *echo.Context) error {
 	if claims != nil && claims.Subject == id.String() {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "cannot delete your own account"})
 	}
-	if err := h.q.DeleteUser(c.Request().Context(), id); err != nil {
+	ctx := c.Request().Context()
+
+	if sole, err := h.userIsSoleAdmin(ctx, id); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	} else if sole {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "cannot delete the sole admin user"})
+	}
+
+	if err := h.q.DeleteUser(ctx, id); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not delete user"})
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *authHandlers) userIsSoleAdmin(ctx context.Context, userID uuid.UUID) (bool, error) {
+	roles, err := h.q.ListUserRoles(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	hasAdmin := false
+	for _, r := range roles {
+		if r.Name == "admin" {
+			hasAdmin = true
+			break
+		}
+	}
+	if !hasAdmin {
+		return false, nil
+	}
+	count, err := h.q.CountAdmins(ctx)
+	if err != nil {
+		return false, err
+	}
+	return count <= 1, nil
 }

@@ -23,9 +23,9 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 }
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users (username, email, first_name, last_name, password_hash, user_type)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, username, email, first_name, last_name, password_hash, user_type, created_at, updated_at
+INSERT INTO users (username, email, first_name, last_name, password_hash)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, username, email, first_name, last_name, password_hash, created_at, updated_at
 `
 
 type CreateUserParams struct {
@@ -34,7 +34,6 @@ type CreateUserParams struct {
 	FirstName    string
 	LastName     string
 	PasswordHash string
-	UserType     string
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
@@ -44,7 +43,6 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		arg.FirstName,
 		arg.LastName,
 		arg.PasswordHash,
-		arg.UserType,
 	)
 	var i User
 	err := row.Scan(
@@ -54,7 +52,6 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.FirstName,
 		&i.LastName,
 		&i.PasswordHash,
-		&i.UserType,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -71,7 +68,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) error {
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, email, first_name, last_name, password_hash, user_type, created_at, updated_at FROM users WHERE id = $1
+SELECT id, username, email, first_name, last_name, password_hash, created_at, updated_at FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -84,7 +81,6 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.FirstName,
 		&i.LastName,
 		&i.PasswordHash,
-		&i.UserType,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -92,7 +88,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 }
 
 const getUserByUsernameOrEmail = `-- name: GetUserByUsernameOrEmail :one
-SELECT id, username, email, first_name, last_name, password_hash, user_type, created_at, updated_at FROM users
+SELECT id, username, email, first_name, last_name, password_hash, created_at, updated_at FROM users
 WHERE lower(username) = lower($1::text)
    OR lower(email) = lower($1::text)
 LIMIT 1
@@ -108,7 +104,6 @@ func (q *Queries) GetUserByUsernameOrEmail(ctx context.Context, dollar_1 string)
 		&i.FirstName,
 		&i.LastName,
 		&i.PasswordHash,
-		&i.UserType,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -116,7 +111,7 @@ func (q *Queries) GetUserByUsernameOrEmail(ctx context.Context, dollar_1 string)
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, username, email, first_name, last_name, password_hash, user_type, created_at, updated_at FROM users
+SELECT id, username, email, first_name, last_name, password_hash, created_at, updated_at FROM users
 ORDER BY created_at ASC, id ASC
 LIMIT $2::int OFFSET $1::int
 `
@@ -142,7 +137,6 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 			&i.FirstName,
 			&i.LastName,
 			&i.PasswordHash,
-			&i.UserType,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {

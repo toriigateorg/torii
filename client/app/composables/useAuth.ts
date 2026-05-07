@@ -1,10 +1,16 @@
+export interface RoleSummary {
+  id: string
+  name: string
+}
+
 export interface AuthUser {
   id: string
   username: string
   email: string
   first_name: string
   last_name: string
-  user_type: string
+  roles: RoleSummary[]
+  permissions: string[]
 }
 
 interface TokenResponse {
@@ -28,6 +34,15 @@ export function useAuth() {
   const ready = useState<boolean>("auth:ready", () => false)
 
   const isAuthed = computed(() => !!accessToken.value && !!user.value)
+  const isAdmin = computed(() => !!user.value?.roles?.some((r) => r.name === "admin"))
+
+  function hasPermission(perm: string): boolean {
+    return !!user.value?.permissions?.includes(perm)
+  }
+
+  function hasAnyPermission(perms: string[]): boolean {
+    return perms.some((p) => hasPermission(p))
+  }
 
   function scheduleRefresh(expiresIn: number) {
     clearRefreshTimer()
@@ -124,6 +139,9 @@ export function useAuth() {
     user,
     ready,
     isAuthed,
+    isAdmin,
+    hasPermission,
+    hasAnyPermission,
     signup,
     signin,
     refresh,

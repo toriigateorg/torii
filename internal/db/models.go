@@ -18,6 +18,26 @@ type RefreshToken struct {
 	RevokedAt pgtype.Timestamptz
 }
 
+type Role struct {
+	ID          uuid.UUID
+	Name        string
+	Description string
+	IsSystem    bool
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+type RolePermission struct {
+	RoleID     uuid.UUID
+	Permission string
+}
+
+type RoleService struct {
+	RoleID    uuid.UUID
+	ServiceID uuid.UUID
+	CreatedAt pgtype.Timestamptz
+}
+
 type Service struct {
 	ID          uuid.UUID
 	Title       string
@@ -36,7 +56,12 @@ type User struct {
 	FirstName    string
 	LastName     string
 	PasswordHash string
-	UserType     string
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
+}
+
+type UserRole struct {
+	UserID    uuid.UUID
+	RoleID    uuid.UUID
+	CreatedAt pgtype.Timestamptz
 }

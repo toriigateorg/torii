@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 	"github.com/urfave/cli/v3"
@@ -317,9 +318,20 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, spa echo.HandlerFun
 		}
 		if cache != nil {
 			if svc, ok := cache.Lookup(c.Request().Context(), host); ok {
-				if auth.ValidAccessToken(c, cfg.JWTSecret) {
-					return proxy.ProxyTo(svc, c)
+				claims, err := auth.ClaimsFromRequest(c, cfg.JWTSecret)
+				if err != nil {
+					return spa(c)
 				}
+				roleIDs := make([]uuid.UUID, 0, len(claims.RoleIDs))
+				for _, s := range claims.RoleIDs {
+					if id, err := uuid.Parse(s); err == nil {
+						roleIDs = append(roleIDs, id)
+					}
+				}
+				if !svc.AllowsAnyRole(roleIDs) {
+					return c.JSON(http.StatusForbidden, map[string]string{"error": "forbidden: no role grants access to this service"})
+				}
+				return proxy.ProxyTo(svc, c)
 			}
 		}
 		return spa(c)

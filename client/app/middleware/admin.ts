@@ -1,9 +1,12 @@
 export default defineNuxtRouteMiddleware(() => {
-  const { isAuthed, user } = useAuth()
+  const { isAuthed, isAdmin, hasAnyPermission } = useAuth()
   if (!isAuthed.value) {
     return navigateTo("/signin")
   }
-  if (user.value?.user_type !== "admin") {
+  const adminCapable = isAdmin.value || hasAnyPermission([
+    "users.read", "roles.read", "services.read", "tokens.read",
+  ])
+  if (!adminCapable) {
     throw createError({
       statusCode: 401,
       statusMessage: "Unauthorized",

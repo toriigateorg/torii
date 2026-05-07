@@ -57,8 +57,16 @@ const greeting = computed(() => {
             <dd class="break-all">{{ user.email }}</dd>
           </div>
           <div class="flex justify-between sm:block">
-            <dt class="text-muted-foreground">role</dt>
-            <dd>{{ user.user_type }}</dd>
+            <dt class="text-muted-foreground">roles</dt>
+            <dd class="flex flex-wrap gap-1">
+              <Badge
+                v-for="r in user.roles"
+                :key="r.id"
+                :variant="r.name === 'admin' ? 'default' : 'secondary'"
+                class="font-mono text-[10px]"
+              >{{ r.name }}</Badge>
+              <span v-if="!user.roles?.length">—</span>
+            </dd>
           </div>
           <div class="flex justify-between sm:block">
             <dt class="text-muted-foreground">id</dt>

@@ -26,7 +26,6 @@ type tokenSessionDTO struct {
 	UserID    string      `json:"user_id"`
 	Username  string      `json:"username"`
 	Email     string      `json:"email"`
-	UserType  string      `json:"user_type"`
 	CreatedAt string      `json:"created_at"`
 	ExpiresAt string      `json:"expires_at"`
 	RevokedAt *string     `json:"revoked_at"`
@@ -61,7 +60,6 @@ func (h *authHandlers) adminListTokens(c *echo.Context) error {
 			UserID:    r.UserID.String(),
 			Username:  r.Username,
 			Email:     r.Email,
-			UserType:  r.UserType,
 			CreatedAt: tsString(r.CreatedAt),
 			ExpiresAt: tsString(r.ExpiresAt),
 			Status:    classifyToken(r.ExpiresAt, r.RevokedAt),

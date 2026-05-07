@@ -133,8 +133,7 @@ SELECT
     rt.created_at,
     rt.revoked_at,
     u.username,
-    u.email,
-    u.user_type
+    u.email
 FROM refresh_tokens rt
 JOIN users u ON u.id = rt.user_id
 ORDER BY rt.created_at DESC, rt.id ASC
@@ -155,7 +154,6 @@ type ListRefreshTokensWithUsersRow struct {
 	RevokedAt pgtype.Timestamptz
 	Username  string
 	Email     string
-	UserType  string
 }
 
 func (q *Queries) ListRefreshTokensWithUsers(ctx context.Context, arg ListRefreshTokensWithUsersParams) ([]ListRefreshTokensWithUsersRow, error) {
@@ -176,7 +174,6 @@ func (q *Queries) ListRefreshTokensWithUsers(ctx context.Context, arg ListRefres
 			&i.RevokedAt,
 			&i.Username,
 			&i.Email,
-			&i.UserType,
 		); err != nil {
 			return nil, err
 		}

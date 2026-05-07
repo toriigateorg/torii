@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { Plus, Trash2 } from "lucide-vue-next"
+import { Plus, Trash2, ShieldCheck } from "lucide-vue-next"
 import type { AuthUser } from "~/composables/useAuth"
-import type { CreateUserPayload } from "~/composables/useAdminApi"
+import type { CreateUserPayload, Role } from "~/composables/useAdminApi"
 
 definePageMeta({ middleware: ["auth", "admin"] })
 useHead({ title: "Admin · Users — sanmon" })
@@ -27,11 +27,16 @@ const newUser = ref<CreateUserPayload>({
   password: "",
   first_name: "",
   last_name: "",
-  user_type: "user",
 })
 
 const deleteTarget = ref<AuthUser | null>(null)
 const deleting = ref(false)
+
+const rolesTarget = ref<AuthUser | null>(null)
+const allRoles = ref<Role[]>([])
+const userRoles = ref<Role[]>([])
+const rolesLoading = ref(false)
+const rolesError = ref<string | null>(null)
 
 async function load() {
   loading.value = true
@@ -58,7 +63,6 @@ function resetCreate() {
     password: "",
     first_name: "",
     last_name: "",
-    user_type: "user",
   }
   createError.value = null
 }
@@ -98,6 +102,49 @@ async function confirmDelete() {
 function isSelf(u: AuthUser) {
   return currentUser.value?.id === u.id
 }
+
+async function openRoles(u: AuthUser) {
+  rolesTarget.value = u
+  rolesError.value = null
+  rolesLoading.value = true
+  try {
+    const [rolesRes, userRolesRes] = await Promise.all([
+      api.listRoles(1, 100),
+      api.listUserRoles(u.id),
+    ])
+    allRoles.value = rolesRes.items
+    userRoles.value = userRolesRes.items
+  } catch (e: unknown) {
+    const err = e as { data?: { error?: string }; message?: string }
+    rolesError.value = err?.data?.error ?? err?.message ?? "Failed to load roles"
+  } finally {
+    rolesLoading.value = false
+  }
+}
+
+function isAssigned(roleId: string) {
+  return userRoles.value.some((r) => r.id === roleId)
+}
+
+async function toggleRole(role: Role) {
+  if (!rolesTarget.value) return
+  if (role.is_system && role.name === "all") return
+  const userId = rolesTarget.value.id
+  rolesError.value = null
+  try {
+    if (isAssigned(role.id)) {
+      await api.revokeUserRole(userId, role.id)
+    } else {
+      await api.assignUserRole(userId, role.id)
+    }
+    const userRolesRes = await api.listUserRoles(userId)
+    userRoles.value = userRolesRes.items
+    await load()
+  } catch (e: unknown) {
+    const err = e as { data?: { error?: string }; message?: string }
+    rolesError.value = err?.data?.error ?? err?.message ?? "Failed to update role"
+  }
+}
 </script>
 
 <template>
@@ -124,7 +171,7 @@ function isSelf(u: AuthUser) {
             <TableHead>Username</TableHead>
             <TableHead>Email</TableHead>
             <TableHead>Name</TableHead>
-            <TableHead>Role</TableHead>
+            <TableHead>Roles</TableHead>
             <TableHead class="text-right">Actions</TableHead>
           </TableRow>
         </TableHeader>
@@ -144,11 +191,27 @@ function isSelf(u: AuthUser) {
             <TableCell class="font-mono text-xs break-all">{{ u.email }}</TableCell>
             <TableCell>{{ [u.first_name, u.last_name].filter(Boolean).join(" ") || "—" }}</TableCell>
             <TableCell>
-              <Badge :variant="u.user_type === 'admin' ? 'default' : 'secondary'">
-                <span class="sr-only">Role: </span>{{ u.user_type }}
-              </Badge>
+              <div class="flex flex-wrap gap-1">
+                <Badge
+                  v-for="r in u.roles"
+                  :key="r.id"
+                  :variant="r.name === 'admin' ? 'default' : 'secondary'"
+                  class="font-mono text-[10px]"
+                >{{ r.name }}</Badge>
+                <span v-if="!u.roles?.length" class="text-muted-foreground font-mono text-[10px]">—</span>
+              </div>
             </TableCell>
             <TableCell class="text-right">
+              <Button
+                variant="ghost"
+                size="icon"
+                class="size-8"
+                :title="`Manage roles for ${u.username}`"
+                :aria-label="`Manage roles for ${u.username}`"
+                @click="openRoles(u)"
+              >
+                <ShieldCheck class="size-4" aria-hidden="true" />
+              </Button>
               <Button
                 variant="ghost"
                 size="icon"
@@ -179,6 +242,7 @@ function isSelf(u: AuthUser) {
           <DialogTitle>Create user</DialogTitle>
           <DialogDescription>
             {{ isProd ? "Strong password required (8+ chars, upper, lower, digit, symbol)." : "Dev mode: any non-empty password works." }}
+            New users are added to the <span class="font-mono">all</span> role only — assign more roles after creation.
           </DialogDescription>
         </DialogHeader>
         <form class="flex flex-col gap-4" @submit.prevent="submitCreate">
@@ -202,13 +266,6 @@ function isSelf(u: AuthUser) {
             <div class="flex flex-col gap-1.5 col-span-2">
               <Label for="cu-pw">Password</Label>
               <Input id="cu-pw" v-model="newUser.password" type="password" autocomplete="new-password" />
-            </div>
-            <div class="flex flex-col gap-1.5 col-span-2">
-              <Label for="cu-type">Role</Label>
-              <NativeSelect id="cu-type" v-model="newUser.user_type">
-                <NativeSelectOption value="user">user</NativeSelectOption>
-                <NativeSelectOption value="admin">admin</NativeSelectOption>
-              </NativeSelect>
             </div>
           </div>
           <p
@@ -242,6 +299,46 @@ function isSelf(u: AuthUser) {
           <Button variant="destructive" :disabled="deleting" @click="confirmDelete">
             {{ deleting ? "Deleting…" : "Delete" }}
           </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog :open="!!rolesTarget" @update:open="(v) => { if (!v) rolesTarget = null }">
+      <DialogContent class="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Manage roles</DialogTitle>
+          <DialogDescription>
+            Toggle role membership for <span class="font-mono">{{ rolesTarget?.username }}</span>.
+            The <span class="font-mono">all</span> role is automatic.
+          </DialogDescription>
+        </DialogHeader>
+        <Alert v-if="rolesError" variant="destructive">
+          <AlertDescription>{{ rolesError }}</AlertDescription>
+        </Alert>
+        <div v-if="rolesLoading" class="text-muted-foreground font-mono text-xs py-6 text-center">loading…</div>
+        <div v-else class="flex flex-col gap-2 max-h-80 overflow-y-auto">
+          <label
+            v-for="r in allRoles"
+            :key="r.id"
+            class="flex items-start gap-3 p-2 rounded hairline cursor-pointer"
+            :class="{ 'opacity-60 cursor-not-allowed': r.is_system && r.name === 'all' }"
+          >
+            <Checkbox
+              :model-value="isAssigned(r.id)"
+              :disabled="r.is_system && r.name === 'all'"
+              @update:model-value="toggleRole(r)"
+            />
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="font-mono text-xs">{{ r.name }}</span>
+                <Badge v-if="r.is_system" variant="outline" class="text-[10px]">system</Badge>
+              </div>
+              <p v-if="r.description" class="text-xs text-muted-foreground mt-0.5">{{ r.description }}</p>
+            </div>
+          </label>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" @click="rolesTarget = null">Close</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

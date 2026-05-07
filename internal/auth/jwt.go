@@ -9,16 +9,34 @@ import (
 )
 
 type Claims struct {
-	Username string `json:"username"`
-	UserType string `json:"user_type"`
+	Username    string   `json:"username"`
+	Permissions []string `json:"permissions"`
+	RoleIDs     []string `json:"role_ids"`
 	jwt.RegisteredClaims
 }
 
-func IssueAccessToken(userID uuid.UUID, username, userType string, secret []byte, ttl time.Duration) (string, time.Time, error) {
+func (c *Claims) Has(perm string) bool {
+	for _, p := range c.Permissions {
+		if p == perm {
+			return true
+		}
+	}
+	return false
+}
+
+func IssueAccessToken(userID uuid.UUID, username string, perms []string, roleIDs []uuid.UUID, secret []byte, ttl time.Duration) (string, time.Time, error) {
 	expiresAt := time.Now().Add(ttl)
+	roleStrs := make([]string, len(roleIDs))
+	for i, r := range roleIDs {
+		roleStrs[i] = r.String()
+	}
+	if perms == nil {
+		perms = []string{}
+	}
 	claims := Claims{
-		Username: username,
-		UserType: userType,
+		Username:    username,
+		Permissions: perms,
+		RoleIDs:     roleStrs,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID.String(),
 			ExpiresAt: jwt.NewNumericDate(expiresAt),

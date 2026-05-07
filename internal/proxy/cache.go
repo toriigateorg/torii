@@ -17,6 +17,19 @@ type CachedService struct {
 	Domain  string
 	Target  *url.URL
 	Headers map[string]string
+	RoleIDs map[uuid.UUID]struct{}
+}
+
+func (s *CachedService) AllowsAnyRole(roleIDs []uuid.UUID) bool {
+	if len(s.RoleIDs) == 0 || len(roleIDs) == 0 {
+		return false
+	}
+	for _, r := range roleIDs {
+		if _, ok := s.RoleIDs[r]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 type ServiceCache struct {
@@ -64,7 +77,7 @@ func (c *ServiceCache) Invalidate() {
 }
 
 func (c *ServiceCache) refreshLocked(ctx context.Context) {
-	rows, err := c.q.ListAllServicesForCache(ctx)
+	rows, err := c.q.ListAllServicesWithRolesForCache(ctx)
 	if err != nil {
 		return
 	}
@@ -78,11 +91,16 @@ func (c *ServiceCache) refreshLocked(ctx context.Context) {
 		if len(r.Headers) > 0 {
 			_ = json.Unmarshal(r.Headers, &headers)
 		}
+		roleSet := make(map[uuid.UUID]struct{}, len(r.RoleIds))
+		for _, id := range r.RoleIds {
+			roleSet[id] = struct{}{}
+		}
 		next[r.Domain] = &CachedService{
 			ID:      r.ID,
 			Domain:  r.Domain,
 			Target:  target,
 			Headers: headers,
+			RoleIDs: roleSet,
 		}
 	}
 	c.byDomain = next

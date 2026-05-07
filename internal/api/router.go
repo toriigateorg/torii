@@ -42,7 +42,7 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 		return
 	}
 
-	h := &authHandlers{q: db.New(pool), cfg: cfg, cache: cache}
+	h := &authHandlers{pool: pool, q: db.New(pool), cfg: cfg, cache: cache}
 
 	v1.POST("/signup", h.signup)
 	v1.POST("/signin", h.signin)
@@ -50,15 +50,36 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	v1.POST("/logout", h.logout)
 	v1.GET("/me", h.me, auth.RequireUser(cfg.JWTSecret))
 
-	admin := v1.Group("/admin", auth.RequireAdmin(cfg.JWTSecret))
-	admin.GET("/users", h.adminListUsers)
-	admin.POST("/users", h.adminCreateUser)
-	admin.DELETE("/users/:id", h.adminDeleteUser)
-	admin.GET("/tokens", h.adminListTokens)
-	admin.DELETE("/tokens/:id", h.adminRevokeToken)
-	admin.POST("/tokens/cleanup", h.adminCleanupTokens)
-	admin.GET("/services", h.adminListServices)
-	admin.POST("/services", h.adminCreateService)
-	admin.PATCH("/services/:id", h.adminUpdateService)
-	admin.DELETE("/services/:id", h.adminDeleteService)
+	secret := cfg.JWTSecret
+	gate := func(perm string) echo.MiddlewareFunc { return auth.RequirePermission(secret, perm) }
+
+	v1.GET("/admin/users", h.adminListUsers, gate(auth.PermUsersRead))
+	v1.POST("/admin/users", h.adminCreateUser, gate(auth.PermUsersCreate))
+	v1.DELETE("/admin/users/:id", h.adminDeleteUser, gate(auth.PermUsersDelete))
+	v1.GET("/admin/users/:id/roles", h.adminListUserRoles, gate(auth.PermUserRolesRead))
+	v1.POST("/admin/users/:id/roles", h.adminAssignUserRole, gate(auth.PermUserRolesCreate))
+	v1.DELETE("/admin/users/:id/roles/:rid", h.adminRevokeUserRole, gate(auth.PermUserRolesDelete))
+
+	v1.GET("/admin/tokens", h.adminListTokens, gate(auth.PermTokensRead))
+	v1.DELETE("/admin/tokens/:id", h.adminRevokeToken, gate(auth.PermTokensDelete))
+	v1.POST("/admin/tokens/cleanup", h.adminCleanupTokens, gate(auth.PermTokensDelete))
+
+	v1.GET("/admin/services", h.adminListServices, gate(auth.PermServicesRead))
+	v1.POST("/admin/services", h.adminCreateService, gate(auth.PermServicesCreate))
+	v1.PATCH("/admin/services/:id", h.adminUpdateService, gate(auth.PermServicesUpdate))
+	v1.DELETE("/admin/services/:id", h.adminDeleteService, gate(auth.PermServicesDelete))
+
+	v1.GET("/admin/roles", h.adminListRoles, gate(auth.PermRolesRead))
+	v1.POST("/admin/roles", h.adminCreateRole, gate(auth.PermRolesCreate))
+	v1.GET("/admin/roles/:id", h.adminGetRole, gate(auth.PermRolesRead))
+	v1.PATCH("/admin/roles/:id", h.adminUpdateRole, gate(auth.PermRolesUpdate))
+	v1.DELETE("/admin/roles/:id", h.adminDeleteRole, gate(auth.PermRolesDelete))
+	v1.GET("/admin/roles/:id/permissions", h.adminGetRolePermissions, gate(auth.PermPermissionsRead))
+	v1.PUT("/admin/roles/:id/permissions", h.adminSetRolePermissions, gate(auth.PermRolesUpdate))
+	v1.GET("/admin/roles/:id/services", h.adminListRoleServices, gate(auth.PermRoleServicesRead))
+	v1.POST("/admin/roles/:id/services", h.adminAssignRoleService, gate(auth.PermRoleServicesCreate))
+	v1.DELETE("/admin/roles/:id/services/:sid", h.adminRevokeRoleService, gate(auth.PermRoleServicesDelete))
+	v1.GET("/admin/roles/:id/users", h.adminListRoleUsers, gate(auth.PermRolesRead))
+
+	v1.GET("/admin/permissions", h.adminListPermissions, gate(auth.PermPermissionsRead))
 }
