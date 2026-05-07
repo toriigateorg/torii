@@ -314,6 +314,18 @@ func pipePrefixed(wg *sync.WaitGroup, r io.Reader, prefix string) {
 // configured service.domain are reverse-proxied (when the caller carries a
 // valid sanmon access token); everything else falls through to the SPA so the
 // signin page or 4xx page can render under the unknown domain.
+// hasSessionMarker reports whether the request carries the non-secret
+// session marker cookie. Used by dispatch to decide whether an unauthenticated
+// request on a service domain is worth a refresh-and-redirect attempt
+// (marker present → refresh token is still alive) or whether the user is
+// genuinely logged out and should fall through to the SPA (no marker →
+// avoid loops where /signin keeps redirecting to a refresh that always
+// fails).
+func hasSessionMarker(r *http.Request) bool {
+	ck, err := r.Cookie(auth.SessionCookie)
+	return err == nil && ck != nil && ck.Value != ""
+}
+
 // isDocumentRequest is true for top-level browser navigations (GET requests
 // for HTML). Used to decide whether dispatch should 302-bounce through the
 // refresh endpoint or just fall through to the SPA: redirecting an XHR or an
@@ -349,15 +361,17 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logg
 		if cache != nil {
 			if svc, ok := cache.Lookup(c.Request().Context(), host); ok {
 				claims, err := auth.ClaimsFromRequest(c, cfg.JWTSecret)
-				// Access token missing/expired on a proxied domain. The
-				// refresh cookie is path-scoped to /api/v1/ so it isn't
-				// sent on a request to "/", which means we can't rotate
-				// inline here. For top-level document navigations we
-				// 302 the browser through /api/v1/refresh_and_redirect
-				// (where the cookie does ride along) and bounce back to
-				// the original URL. Sub-resource fetches fall through to
-				// the SPA and will be re-issued after the document reload.
-				if err != nil && refresher != nil && isDocumentRequest(c.Request()) {
+				// Access token expired on a proxied domain. The refresh
+				// cookie is path-scoped to /api/v1/ so it isn't sent on
+				// a request to "/" — we can't rotate inline. For top-
+				// level document navigations we 302 the browser through
+				// /api/v1/refresh_and_redirect (where the cookie does
+				// ride along) and bounce back. Only do this when an
+				// access cookie is actually present: an absent cookie
+				// means the user is logged out, so falling through to
+				// the SPA is correct (avoids a redirect loop after
+				// logout, since the refresh handler would also fail).
+				if err != nil && refresher != nil && isDocumentRequest(c.Request()) && hasSessionMarker(c.Request()) {
 					to := c.Request().URL.RequestURI()
 					return c.Redirect(http.StatusFound, "/api/v1/refresh_and_redirect?to="+url.QueryEscape(to))
 				}
