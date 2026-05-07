@@ -381,6 +381,64 @@ func (h *authHandlers) issueSession(ctx context.Context, c *echo.Context, user d
 	return access, roles, perms, nil
 }
 
+// refreshAndRedirect rotates the session using the refresh cookie and 302s
+// back to the caller-supplied `to` path. Lives at /api/v1/refresh_and_redirect
+// so the path-scoped refresh cookie actually rides along on the request — the
+// proxy dispatch redirects the browser here whenever an access token expires
+// on a proxied service domain.
+func (h *authHandlers) refreshAndRedirect(c *echo.Context) error {
+	to := c.QueryParam("to")
+	// Only allow same-origin relative redirects. Reject schemes, host-relative
+	// "//host/..." forms, and anything that doesn't start with a single "/".
+	if to == "" || !strings.HasPrefix(to, "/") || strings.HasPrefix(to, "//") {
+		to = "/"
+	}
+	if _, err := h.AttemptCookieRefresh(c); err != nil {
+		return c.Redirect(http.StatusFound, "/signin")
+	}
+	return c.Redirect(http.StatusFound, to)
+}
+
+// AttemptCookieRefresh validates the refresh cookie on the request, rotates
+// the refresh token, mints a new access token, sets fresh cookies on the
+// response, and returns the new claims. On failure it returns nil and clears
+// auth cookies. Used by the proxy dispatch so that an expired access token on
+// a proxied service domain doesn't fall through to the SPA.
+func (h *authHandlers) AttemptCookieRefresh(c *echo.Context) (*auth.Claims, error) {
+	secure := h.cfg.IsProd()
+	ctx := c.Request().Context()
+
+	cookie, err := c.Cookie(auth.RefreshCookie)
+	if err != nil || cookie.Value == "" {
+		return nil, errors.New("no refresh cookie")
+	}
+	hash := auth.HashRefreshToken(cookie.Value)
+
+	row, err := h.q.GetRefreshTokenByHash(ctx, hash)
+	if err != nil {
+		auth.ClearAuthCookies(c, secure)
+		return nil, err
+	}
+	if !row.ExpiresAt.Valid || time.Now().After(row.ExpiresAt.Time) || row.RevokedAt.Valid {
+		_ = h.q.DeleteRefreshTokenByHash(ctx, hash)
+		auth.ClearAuthCookies(c, secure)
+		return nil, errors.New("refresh token expired or revoked")
+	}
+	user, err := h.q.GetUserByID(ctx, row.UserID)
+	if err != nil {
+		auth.ClearAuthCookies(c, secure)
+		return nil, err
+	}
+	if err := h.q.DeleteRefreshTokenByHash(ctx, hash); err != nil {
+		return nil, err
+	}
+	accessTok, _, _, err := h.issueSession(ctx, c, user)
+	if err != nil {
+		return nil, err
+	}
+	return auth.ParseAccessToken(accessTok, h.cfg.JWTSecret)
+}
+
 func (h *authHandlers) issueAndRespond(c *echo.Context, user db.User) error {
 	access, roles, perms, err := h.issueSession(c.Request().Context(), c, user)
 	if err != nil {

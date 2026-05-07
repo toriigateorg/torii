@@ -15,8 +15,17 @@ import (
 	"sanmon/internal/proxy"
 )
 
-// Register mounts the /api/v1 routes on the given echo instance.
-func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logger) {
+// SessionRefresher rotates the caller's session using the refresh cookie,
+// sets fresh auth cookies on the response, and returns the resulting claims.
+// Implemented by *authHandlers so the proxy dispatch can recover from an
+// expired access token without bouncing the user through the SPA.
+type SessionRefresher interface {
+	AttemptCookieRefresh(c *echo.Context) (*auth.Claims, error)
+}
+
+// Register mounts the /api/v1 routes on the given echo instance and returns
+// a SessionRefresher (nil when no DB pool / config is wired).
+func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logger) SessionRefresher {
 	v1 := e.Group("/api/v1")
 
 	v1.GET("/health", func(c *echo.Context) error {
@@ -40,7 +49,7 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	})
 
 	if pool == nil || cfg == nil {
-		return
+		return nil
 	}
 
 	h := &authHandlers{pool: pool, q: db.New(pool), cfg: cfg, cache: cache, auditor: auditor}
@@ -48,6 +57,7 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	v1.POST("/signup", h.signup)
 	v1.POST("/signin", h.signin)
 	v1.POST("/token_refresh", h.tokenRefresh)
+	v1.GET("/refresh_and_redirect", h.refreshAndRedirect)
 	v1.POST("/logout", h.logout)
 	v1.GET("/me", h.me, auth.RequireUser(cfg.JWTSecret))
 	v1.GET("/me/services", h.myServices, auth.RequireUser(cfg.JWTSecret))
@@ -112,4 +122,6 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	v1.GET("/auth/providers", h.publicListProviders)
 	v1.GET("/oauth/:slug/start", h.oauthStart)
 	v1.GET("/oauth/:slug/callback", h.oauthCallback)
+
+	return h
 }

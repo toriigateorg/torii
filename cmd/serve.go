@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -173,7 +174,7 @@ func runInner(ctx context.Context, host string, port int) error {
 		}
 	}
 
-	api.Register(e, pool, cfg, cache, auditor)
+	refresher := api.Register(e, pool, cfg, cache, auditor)
 
 	var spaHandler echo.HandlerFunc
 	if prod {
@@ -186,7 +187,7 @@ func runInner(ctx context.Context, host string, port int) error {
 		go waitForNuxt("127.0.0.1:3000", 10*time.Second)
 	}
 
-	e.Any("/*", dispatch(cfg, cache, auditor, spaHandler))
+	e.Any("/*", dispatch(cfg, cache, auditor, refresher, spaHandler))
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", host, port),
@@ -313,7 +314,24 @@ func pipePrefixed(wg *sync.WaitGroup, r io.Reader, prefix string) {
 // configured service.domain are reverse-proxied (when the caller carries a
 // valid sanmon access token); everything else falls through to the SPA so the
 // signin page or 4xx page can render under the unknown domain.
-func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logger, spa echo.HandlerFunc) echo.HandlerFunc {
+// isDocumentRequest is true for top-level browser navigations (GET requests
+// for HTML). Used to decide whether dispatch should 302-bounce through the
+// refresh endpoint or just fall through to the SPA: redirecting an XHR or an
+// asset fetch to an HTML response would corrupt those callers.
+func isDocumentRequest(r *http.Request) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	if r.Header.Get("X-Requested-With") != "" {
+		return false
+	}
+	if dest := r.Header.Get("Sec-Fetch-Dest"); dest != "" {
+		return dest == "document" || dest == "iframe"
+	}
+	return strings.Contains(r.Header.Get("Accept"), "text/html")
+}
+
+func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logger, refresher api.SessionRefresher, spa echo.HandlerFunc) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		// Never let the SPA handler answer a request that was meant for the
 		// API but didn't match a registered route — that would return an
@@ -331,6 +349,18 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logg
 		if cache != nil {
 			if svc, ok := cache.Lookup(c.Request().Context(), host); ok {
 				claims, err := auth.ClaimsFromRequest(c, cfg.JWTSecret)
+				// Access token missing/expired on a proxied domain. The
+				// refresh cookie is path-scoped to /api/v1/ so it isn't
+				// sent on a request to "/", which means we can't rotate
+				// inline here. For top-level document navigations we
+				// 302 the browser through /api/v1/refresh_and_redirect
+				// (where the cookie does ride along) and bounce back to
+				// the original URL. Sub-resource fetches fall through to
+				// the SPA and will be re-issued after the document reload.
+				if err != nil && refresher != nil && isDocumentRequest(c.Request()) {
+					to := c.Request().URL.RequestURI()
+					return c.Redirect(http.StatusFound, "/api/v1/refresh_and_redirect?to="+url.QueryEscape(to))
+				}
 				if err != nil {
 					if auditor != nil {
 						svcID := svc.ID
