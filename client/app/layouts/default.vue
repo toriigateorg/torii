@@ -24,12 +24,13 @@ async function onSignout() {
 
 <template>
   <div class="min-h-screen bg-background text-foreground flex flex-col">
+    <a href="#main-content" class="skip-link">Skip to main content</a>
     <header
       class="sticky top-0 z-40 w-full border-b border-border/60 bg-background/70 backdrop-blur-xl"
     >
       <div class="mx-auto max-w-7xl flex h-14 items-center justify-between px-4 sm:px-6 lg:px-8">
-        <NuxtLink to="/" class="flex items-center gap-2 group">
-          <div class="relative size-7 rounded-md hairline overflow-hidden bg-gradient-to-br from-primary/15 to-transparent flex items-center justify-center">
+        <NuxtLink to="/" class="flex items-center gap-2 group" aria-label="sanmon — home">
+          <div aria-hidden="true" class="relative size-7 rounded-md hairline overflow-hidden bg-gradient-to-br from-primary/15 to-transparent flex items-center justify-center">
             <span class="font-mono text-[11px] font-semibold tracking-tight">sm</span>
             <span class="absolute inset-0 ring-1 ring-inset ring-primary/10 rounded-md" />
           </div>
@@ -37,12 +38,12 @@ async function onSignout() {
           <span class="text-mono-label hidden sm:inline ml-2">v0.1</span>
         </NuxtLink>
 
-        <nav class="hidden md:flex items-center gap-1">
+        <nav class="hidden md:flex items-center gap-1" aria-label="Primary">
           <NuxtLink
             v-for="link in navLinks"
             :key="link.to"
             :to="link.to"
-            class="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-md"
+            class="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {{ link.label }}
           </NuxtLink>
@@ -54,9 +55,9 @@ async function onSignout() {
             target="_blank"
             rel="noopener"
             class="hidden sm:inline-flex items-center justify-center size-9 hairline rounded-md text-muted-foreground hover:text-foreground transition-colors"
-            aria-label="GitHub"
+            aria-label="GitHub (opens in a new tab)"
           >
-            <Github class="size-4" />
+            <Github class="size-4" aria-hidden="true" />
           </a>
           <ThemeToggle />
 
@@ -70,17 +71,17 @@ async function onSignout() {
               <DropdownMenuContent align="end" class="w-48">
                 <DropdownMenuItem as-child>
                   <NuxtLink to="/dashboard" class="cursor-pointer">
-                    <LayoutDashboard class="size-4 mr-2" /> Dashboard
+                    <LayoutDashboard class="size-4 mr-2" aria-hidden="true" /> Dashboard
                   </NuxtLink>
                 </DropdownMenuItem>
                 <DropdownMenuItem v-if="user?.user_type === 'admin'" as-child>
                   <NuxtLink to="/admin/model/users" class="cursor-pointer">
-                    <ShieldCheck class="size-4 mr-2" /> Admin
+                    <ShieldCheck class="size-4 mr-2" aria-hidden="true" /> Admin
                   </NuxtLink>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem class="cursor-pointer" @select="onSignout">
-                  <LogOut class="size-4 mr-2" /> Sign out
+                  <LogOut class="size-4 mr-2" aria-hidden="true" /> Sign out
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -88,7 +89,7 @@ async function onSignout() {
           <template v-else>
             <NuxtLink to="/signin" class="hidden sm:inline-flex">
               <Button variant="outline" size="sm" class="hairline h-9">
-                <LogIn class="size-4 mr-2" /> Sign in
+                <LogIn class="size-4 mr-2" aria-hidden="true" /> Sign in
               </Button>
             </NuxtLink>
           </template>
@@ -96,19 +97,19 @@ async function onSignout() {
           <Sheet v-model:open="mobileOpen">
             <SheetTrigger as-child>
               <Button variant="ghost" size="icon" class="md:hidden hairline rounded-md size-9" aria-label="Open menu">
-                <Menu class="size-4" />
+                <Menu class="size-4" aria-hidden="true" />
               </Button>
             </SheetTrigger>
             <SheetContent side="right" class="w-72">
               <SheetHeader>
                 <SheetTitle class="font-mono text-sm tracking-wider uppercase">Navigation</SheetTitle>
               </SheetHeader>
-              <nav class="flex flex-col gap-1 mt-6 px-4">
+              <nav class="flex flex-col gap-1 mt-6 px-4" aria-label="Mobile">
                 <NuxtLink
                   v-for="link in navLinks"
                   :key="link.to"
                   :to="link.to"
-                  class="px-3 py-2.5 text-sm rounded-md hover:bg-accent transition-colors"
+                  class="px-3 py-2.5 text-sm rounded-md hover:bg-accent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   @click="mobileOpen = false"
                 >
                   {{ link.label }}
@@ -119,10 +120,11 @@ async function onSignout() {
                       signed in as {{ user?.username }}
                     </p>
                     <button
-                      class="w-full text-left px-3 py-2.5 text-sm rounded-md hover:bg-accent transition-colors flex items-center"
+                      type="button"
+                      class="w-full text-left px-3 py-2.5 text-sm rounded-md hover:bg-accent transition-colors flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       @click="onSignout"
                     >
-                      <LogOut class="size-4 mr-2" /> Sign out
+                      <LogOut class="size-4 mr-2" aria-hidden="true" /> Sign out
                     </button>
                   </template>
                   <template v-else>
@@ -131,7 +133,7 @@ async function onSignout() {
                       class="px-3 py-2.5 text-sm rounded-md hover:bg-accent transition-colors flex items-center"
                       @click="mobileOpen = false"
                     >
-                      <LogIn class="size-4 mr-2" /> Sign in
+                      <LogIn class="size-4 mr-2" aria-hidden="true" /> Sign in
                     </NuxtLink>
                     <NuxtLink
                       to="/signup"
@@ -149,14 +151,16 @@ async function onSignout() {
       </div>
     </header>
 
-    <main class="flex-1">
+    <main id="main-content" tabindex="-1" class="flex-1 focus:outline-none">
       <slot />
     </main>
+
+    <div id="route-announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true" />
 
     <footer class="border-t border-border/60 mt-24">
       <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div class="flex items-center gap-3">
-          <Activity class="size-3.5 text-primary" />
+          <Activity class="size-3.5 text-primary" aria-hidden="true" />
           <span class="font-mono text-xs text-muted-foreground">
             sanmon &middot; identity-aware reverse proxy
           </span>

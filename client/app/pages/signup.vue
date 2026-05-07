@@ -69,18 +69,19 @@ async function onSubmit() {
     <Card class="hairline">
       <CardHeader>
         <div class="flex items-center gap-2 mb-1">
-          <UserPlus class="size-4 text-primary" />
+          <UserPlus class="size-4 text-primary" aria-hidden="true" />
           <span class="text-mono-label">// signup</span>
         </div>
+        <h1 class="sr-only">Create a sanmon account</h1>
         <CardTitle class="text-2xl tracking-tight">Create account</CardTitle>
-        <CardDescription>
+        <CardDescription id="signup-pw-hint">
           {{ isProd
             ? "Use a strong password (8+ chars, upper, lower, digit, symbol)."
             : "Dev mode: any non-empty password works." }}
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form class="flex flex-col gap-4" @submit.prevent="onSubmit">
+        <form class="flex flex-col gap-4" novalidate aria-describedby="signup-error" @submit.prevent="onSubmit">
           <div class="flex flex-col gap-1.5">
             <Label for="username">Username</Label>
             <Input id="username" v-model="username" autocomplete="username" autofocus />
@@ -101,14 +102,35 @@ async function onSubmit() {
           </div>
           <div class="flex flex-col gap-1.5">
             <Label for="password">Password</Label>
-            <Input id="password" v-model="password" type="password" autocomplete="new-password" />
+            <Input
+              id="password"
+              v-model="password"
+              type="password"
+              autocomplete="new-password"
+              required
+              :aria-invalid="error ? 'true' : undefined"
+              aria-describedby="signup-pw-hint signup-error"
+            />
           </div>
           <div class="flex flex-col gap-1.5">
             <Label for="confirm">Confirm password</Label>
-            <Input id="confirm" v-model="confirm" type="password" autocomplete="new-password" />
+            <Input
+              id="confirm"
+              v-model="confirm"
+              type="password"
+              autocomplete="new-password"
+              required
+              :aria-invalid="error ? 'true' : undefined"
+              aria-describedby="signup-error"
+            />
           </div>
-          <p v-if="error" class="text-sm text-destructive">{{ error }}</p>
-          <Button type="submit" class="w-full" :disabled="loading">
+          <p
+            id="signup-error"
+            class="text-sm text-destructive min-h-[1.25rem]"
+            role="alert"
+            aria-live="assertive"
+          >{{ error || '' }}</p>
+          <Button type="submit" class="w-full" :disabled="loading" :aria-busy="loading">
             {{ loading ? "Creating..." : "Create account" }}
           </Button>
         </form>

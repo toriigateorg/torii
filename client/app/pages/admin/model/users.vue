@@ -108,7 +108,7 @@ function isSelf(u: AuthUser) {
         <h2 class="text-xl font-semibold tracking-tight mt-1">All users</h2>
       </div>
       <Button class="h-9" @click="createOpen = true; resetCreate()">
-        <Plus class="size-4 mr-1.5" /> Create user
+        <Plus class="size-4 mr-1.5" aria-hidden="true" /> Create user
       </Button>
     </div>
 
@@ -116,8 +116,9 @@ function isSelf(u: AuthUser) {
       <AlertDescription>{{ error }}</AlertDescription>
     </Alert>
 
-    <div class="hairline rounded-lg overflow-hidden bg-card/40">
+    <div class="hairline rounded-lg overflow-hidden bg-card/40" :aria-busy="loading">
       <Table>
+        <caption class="sr-only">List of user accounts</caption>
         <TableHeader>
           <TableRow>
             <TableHead>Username</TableHead>
@@ -130,7 +131,7 @@ function isSelf(u: AuthUser) {
         <TableBody>
           <TableRow v-if="loading && !items.length">
             <TableCell colspan="5" class="text-center py-12 text-muted-foreground font-mono text-xs">
-              loading…
+              <span role="status">loading…</span>
             </TableCell>
           </TableRow>
           <TableRow v-else-if="!items.length">
@@ -144,7 +145,7 @@ function isSelf(u: AuthUser) {
             <TableCell>{{ [u.first_name, u.last_name].filter(Boolean).join(" ") || "—" }}</TableCell>
             <TableCell>
               <Badge :variant="u.user_type === 'admin' ? 'default' : 'secondary'">
-                {{ u.user_type }}
+                <span class="sr-only">Role: </span>{{ u.user_type }}
               </Badge>
             </TableCell>
             <TableCell class="text-right">
@@ -153,10 +154,11 @@ function isSelf(u: AuthUser) {
                 size="icon"
                 class="size-8"
                 :disabled="isSelf(u)"
-                :title="isSelf(u) ? 'Cannot delete yourself' : 'Delete user'"
+                :title="isSelf(u) ? 'Cannot delete yourself' : `Delete user ${u.username}`"
+                :aria-label="isSelf(u) ? `Cannot delete yourself (${u.username})` : `Delete user ${u.username}`"
                 @click="deleteTarget = u"
               >
-                <Trash2 class="size-4" />
+                <Trash2 class="size-4" aria-hidden="true" />
               </Button>
             </TableCell>
           </TableRow>
@@ -209,7 +211,12 @@ function isSelf(u: AuthUser) {
               </NativeSelect>
             </div>
           </div>
-          <p v-if="createError" class="text-sm text-destructive">{{ createError }}</p>
+          <p
+            id="cu-error"
+            class="text-sm text-destructive min-h-[1.25rem]"
+            role="alert"
+            aria-live="assertive"
+          >{{ createError || '' }}</p>
           <DialogFooter>
             <Button type="button" variant="ghost" @click="createOpen = false">Cancel</Button>
             <Button type="submit" :disabled="creating">

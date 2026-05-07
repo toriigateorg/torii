@@ -59,10 +59,14 @@ function timeAgo(d: Date | null) {
     </p>
 
     <!-- Overall status -->
-    <div
+    <section
       class="mt-10 hairline rounded-xl p-6 sm:p-7 bg-card relative overflow-hidden"
+      aria-labelledby="overall-status-label"
+      :aria-busy="loading"
     >
+      <h2 id="overall-status-label" class="sr-only">Overall status</h2>
       <div
+        aria-hidden="true"
         class="absolute -top-16 -right-16 size-48 rounded-full blur-3xl pointer-events-none"
         :class="{
           'bg-emerald-500/20': overall.tone === 'ok',
@@ -74,6 +78,7 @@ function timeAgo(d: Date | null) {
       <div class="relative flex items-start sm:items-center justify-between flex-col sm:flex-row gap-4">
         <div class="flex items-center gap-4">
           <div
+            aria-hidden="true"
             class="size-11 rounded-full flex items-center justify-center hairline"
             :class="{
               'bg-emerald-500/10 text-emerald-500': overall.tone === 'ok',
@@ -88,7 +93,12 @@ function timeAgo(d: Date | null) {
             <RefreshCw v-else class="size-5 animate-spin" />
           </div>
           <div>
-            <div class="text-lg font-semibold tracking-tight capitalize">{{ overall.label }}</div>
+            <div
+              class="text-lg font-semibold tracking-tight capitalize"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >{{ overall.label }}</div>
             <div class="text-mono-label mt-1">last check &middot; {{ timeAgo(lastChecked) }}</div>
           </div>
         </div>
@@ -97,13 +107,14 @@ function timeAgo(d: Date | null) {
           size="sm"
           class="hairline gap-2"
           :disabled="loading"
+          :aria-busy="loading"
           @click="check"
         >
-          <RefreshCw class="size-3.5" :class="{ 'animate-spin': loading }" />
+          <RefreshCw class="size-3.5" aria-hidden="true" :class="{ 'animate-spin': loading }" />
           Re-check
         </Button>
       </div>
-    </div>
+    </section>
 
     <!-- Checks -->
     <div class="mt-6 hairline rounded-xl bg-card overflow-hidden">
@@ -119,8 +130,8 @@ function timeAgo(d: Date | null) {
       </template>
 
       <template v-else-if="error">
-        <div class="px-5 py-8 text-center">
-          <XCircle class="size-6 text-destructive mx-auto mb-3" />
+        <div class="px-5 py-8 text-center" role="alert">
+          <XCircle class="size-6 text-destructive mx-auto mb-3" aria-hidden="true" />
           <p class="font-mono text-sm">request failed</p>
           <p class="text-xs text-muted-foreground mt-1">{{ error }}</p>
         </div>
@@ -134,6 +145,7 @@ function timeAgo(d: Date | null) {
         >
           <div class="flex items-center gap-3 min-w-0">
             <span
+              aria-hidden="true"
               class="size-2 rounded-full shrink-0"
               :class="row.value ? 'bg-emerald-500' : 'bg-destructive'"
             />
@@ -147,8 +159,9 @@ function timeAgo(d: Date | null) {
             :class="row.value
               ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/5'
               : 'text-destructive bg-destructive/5'"
+            :aria-label="`${row.label}: ${row.value ? 'operational' : 'down'}`"
           >
-            {{ row.value ? 'true' : 'false' }}
+            <span aria-hidden="true">{{ row.value ? 'true' : 'false' }}</span>
           </span>
         </div>
       </template>

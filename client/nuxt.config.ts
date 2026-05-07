@@ -8,6 +8,15 @@ export default defineNuxtConfig({
   css: ["~/assets/css/tailwind.css"],
   ssr: false,
 
+  app: {
+    head: {
+      htmlAttrs: { lang: "en" },
+      meta: [
+        { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" },
+      ],
+    },
+  },
+
   vite: {
     plugins: [tailwindcss()],
   },

@@ -32,7 +32,7 @@ const greeting = computed(() => {
         </p>
       </div>
       <Button variant="outline" class="hairline" @click="onSignout">
-        <LogOut class="size-4 mr-2" />
+        <LogOut class="size-4 mr-2" aria-hidden="true" />
         Sign out
       </Button>
     </div>
@@ -40,7 +40,7 @@ const greeting = computed(() => {
     <Card v-if="user" class="hairline mt-10">
       <CardHeader>
         <div class="flex items-center gap-2 mb-1">
-          <ShieldCheck class="size-4 text-primary" />
+          <ShieldCheck class="size-4 text-primary" aria-hidden="true" />
           <span class="text-mono-label">// session</span>
         </div>
         <CardTitle class="text-lg tracking-tight">Account</CardTitle>

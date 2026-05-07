@@ -20,24 +20,25 @@ function isActive(to: string) {
     </h1>
 
     <div class="grid lg:grid-cols-[200px_1fr] gap-8">
-      <aside>
-        <nav class="flex lg:flex-col gap-1 hairline rounded-lg p-2 bg-card/40">
+      <aside aria-label="Admin sections">
+        <nav class="flex lg:flex-col gap-1 hairline rounded-lg p-2 bg-card/40" aria-label="Admin">
           <NuxtLink
             v-for="link in links"
             :key="link.to"
             :to="link.to"
-            class="flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors"
+            class="flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             :class="isActive(link.to)
               ? 'bg-accent text-foreground'
               : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'"
+            :aria-current="isActive(link.to) ? 'page' : undefined"
           >
-            <component :is="link.icon" class="size-4" />
+            <component :is="link.icon" class="size-4" aria-hidden="true" />
             {{ link.label }}
           </NuxtLink>
         </nav>
       </aside>
 
-      <section>
+      <section aria-label="Admin content">
         <slot />
       </section>
     </div>

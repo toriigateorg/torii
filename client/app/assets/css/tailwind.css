@@ -127,6 +127,20 @@
     @apply bg-background text-foreground antialiased;
     font-family: var(--font-sans);
   }
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="menuitem"]:not([aria-disabled="true"]),
+  [role="option"]:not([aria-disabled="true"]),
+  summary,
+  label[for],
+  a[href] {
+    cursor: pointer;
+  }
+  button:disabled,
+  [role="button"][aria-disabled="true"],
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
 }
 
 @layer utilities {
@@ -178,4 +192,24 @@
   .float-slow {
     animation: float-slow 9s ease-in-out infinite;
   }
+
+  .skip-link {
+    @apply sr-only;
+  }
+  .skip-link:focus {
+    @apply not-sr-only fixed top-3 left-3 z-50 px-4 py-2 rounded-md bg-background text-foreground border border-border shadow-lg outline-none ring-2 ring-ring;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .caret::after { animation: none; }
+  .float-slow { animation: none; }
 }

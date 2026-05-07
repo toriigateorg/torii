@@ -24,9 +24,9 @@ function goHome() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-background text-foreground flex items-center justify-center px-4">
+  <main id="main-content" tabindex="-1" class="min-h-screen bg-background text-foreground flex items-center justify-center px-4 focus:outline-none">
     <div class="max-w-md text-center">
-      <div class="inline-flex items-center justify-center size-14 rounded-2xl hairline bg-card mb-6">
+      <div aria-hidden="true" class="inline-flex items-center justify-center size-14 rounded-2xl hairline bg-card mb-6">
         <ShieldOff class="size-6 text-primary" />
       </div>
       <p class="font-mono text-[11px] tracking-[0.2em] uppercase text-muted-foreground mb-3">
@@ -40,5 +40,5 @@ function goHome() {
       </p>
       <Button class="h-10 px-5" @click="goHome">Go home</Button>
     </div>
-  </div>
+  </main>
 </template>

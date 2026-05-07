@@ -88,8 +88,8 @@ function fmt(ts: string | null) {
           Active refresh tokens. Revoke a row to kill that session within ≤ 5 min.
         </p>
       </div>
-      <Button variant="outline" class="hairline h-9" :disabled="cleaning" @click="cleanup">
-        <Eraser class="size-4 mr-1.5" />
+      <Button variant="outline" class="hairline h-9" :disabled="cleaning" :aria-busy="cleaning" @click="cleanup">
+        <Eraser class="size-4 mr-1.5" aria-hidden="true" />
         {{ cleaning ? "Cleaning…" : "Cleanup expired" }}
       </Button>
     </div>
@@ -98,8 +98,9 @@ function fmt(ts: string | null) {
       <AlertDescription>{{ error }}</AlertDescription>
     </Alert>
 
-    <div class="hairline rounded-lg overflow-hidden bg-card/40">
+    <div class="hairline rounded-lg overflow-hidden bg-card/40" :aria-busy="loading">
       <Table>
+        <caption class="sr-only">Outstanding refresh-token sessions</caption>
         <TableHeader>
           <TableRow>
             <TableHead>User</TableHead>
@@ -113,7 +114,7 @@ function fmt(ts: string | null) {
         <TableBody>
           <TableRow v-if="loading && !items.length">
             <TableCell colspan="6" class="text-center py-12 text-muted-foreground font-mono text-xs">
-              loading…
+              <span role="status">loading…</span>
             </TableCell>
           </TableRow>
           <TableRow v-else-if="!items.length">
@@ -130,7 +131,9 @@ function fmt(ts: string | null) {
             </TableCell>
             <TableCell>
               <div class="flex items-center gap-2">
-                <Badge :variant="statusVariant(t.status)">{{ t.status }}</Badge>
+                <Badge :variant="statusVariant(t.status)">
+                  <span class="sr-only">Status: </span>{{ t.status }}
+                </Badge>
                 <Badge v-if="t.is_current" variant="outline" class="font-mono text-[10px]">this session</Badge>
               </div>
             </TableCell>
@@ -144,9 +147,10 @@ function fmt(ts: string | null) {
                 class="size-8"
                 :disabled="t.status !== 'active' || t.is_current"
                 :title="t.is_current ? 'Use sign out for current session' : t.status !== 'active' ? 'Already revoked or expired' : 'Revoke session'"
+                :aria-label="t.is_current ? `Cannot revoke current session for ${t.username}` : t.status !== 'active' ? `Session for ${t.username} already ${t.status}` : `Revoke session for ${t.username}`"
                 @click="revokeTarget = t"
               >
-                <Trash2 class="size-4" />
+                <Trash2 class="size-4" aria-hidden="true" />
               </Button>
             </TableCell>
           </TableRow>

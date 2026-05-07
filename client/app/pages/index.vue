@@ -61,9 +61,9 @@ const stats = [
 <template>
   <div class="relative">
     <!-- Hero -->
-    <section class="relative overflow-hidden">
-      <div class="absolute inset-0 grid-bg pointer-events-none" />
-      <div class="absolute -top-24 left-1/2 -translate-x-1/2 size-[700px] glow-blob float-slow pointer-events-none opacity-70" />
+    <section class="relative overflow-hidden" aria-labelledby="hero-title">
+      <div aria-hidden="true" class="absolute inset-0 grid-bg pointer-events-none" />
+      <div aria-hidden="true" class="absolute -top-24 left-1/2 -translate-x-1/2 size-[700px] glow-blob float-slow pointer-events-none opacity-70" />
 
       <div class="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-16 sm:pt-24 lg:pt-32 pb-20 lg:pb-28">
         <div class="grid lg:grid-cols-12 gap-10 lg:gap-12 items-center">
@@ -77,11 +77,11 @@ const stats = [
 
             <p class="text-mono-label mb-5">// reverse proxy / auth / rbac</p>
 
-            <h1 class="text-4xl sm:text-5xl lg:text-7xl font-semibold tracking-tight leading-[0.95]">
+            <h1 id="hero-title" class="text-4xl sm:text-5xl lg:text-7xl font-semibold tracking-tight leading-[0.95]">
               The edge between
               <span class="block mt-2">
                 <span class="text-muted-foreground/70">your users</span>
-                <ChevronRight class="inline-block size-8 sm:size-10 lg:size-14 text-primary mx-1 -translate-y-1" />
+                <ChevronRight aria-hidden="true" class="inline-block size-8 sm:size-10 lg:size-14 text-primary mx-1 -translate-y-1" />
                 <span class="text-foreground">your services</span>
               </span>
             </h1>
@@ -95,10 +95,10 @@ const stats = [
             <div class="mt-9 flex flex-col sm:flex-row gap-3">
               <Button size="lg" class="group h-11 px-5 font-medium">
                 Get started
-                <ArrowRight class="size-4 ml-1 group-hover:translate-x-0.5 transition-transform" />
+                <ArrowRight class="size-4 ml-1 group-hover:translate-x-0.5 transition-transform" aria-hidden="true" />
               </Button>
               <Button variant="outline" size="lg" class="h-11 px-5 font-mono text-xs hairline">
-                <Terminal class="size-3.5 mr-2" />
+                <Terminal class="size-3.5 mr-2" aria-hidden="true" />
                 docker run sanmon/sanmon
               </Button>
             </div>
@@ -158,7 +158,7 @@ const stats = [
     </section>
 
     <!-- Stats strip -->
-    <section class="border-y border-border/60 bg-muted/20">
+    <section class="border-y border-border/60 bg-muted/20" aria-label="Key metrics">
       <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 grid grid-cols-2 md:grid-cols-4 gap-6 md:gap-0 md:divide-x divide-border/60">
         <div
           v-for="(s, i) in stats"
@@ -172,10 +172,10 @@ const stats = [
     </section>
 
     <!-- Features -->
-    <section id="features" class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-20 sm:py-28">
+    <section id="features" aria-labelledby="features-title" class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-20 sm:py-28">
       <div class="max-w-2xl mb-14">
         <p class="text-mono-label mb-4">// what it does</p>
-        <h2 class="text-3xl sm:text-4xl font-semibold tracking-tight">
+        <h2 id="features-title" class="text-3xl sm:text-4xl font-semibold tracking-tight">
           One binary at the edge,<br class="hidden sm:block" />
           four problems off your plate.
         </h2>
@@ -193,7 +193,7 @@ const stats = [
                 {{ f.no }} / {{ f.label }}
               </span>
             </div>
-            <component :is="f.icon" class="size-4 text-muted-foreground group-hover:text-primary transition-colors" />
+            <component :is="f.icon" class="size-4 text-muted-foreground group-hover:text-primary transition-colors" aria-hidden="true" />
           </div>
           <h3 class="text-lg sm:text-xl font-semibold tracking-tight mb-2.5">
             {{ f.title }}
@@ -206,11 +206,11 @@ const stats = [
     </section>
 
     <!-- Flow diagram -->
-    <section id="flow" class="border-t border-border/60">
+    <section id="flow" aria-labelledby="flow-title" class="border-t border-border/60">
       <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-20 sm:py-28">
         <div class="max-w-2xl mb-14">
           <p class="text-mono-label mb-4">// request lifecycle</p>
-          <h2 class="text-3xl sm:text-4xl font-semibold tracking-tight">
+          <h2 id="flow-title" class="text-3xl sm:text-4xl font-semibold tracking-tight">
             Auth, policy, proxy &mdash; in that order.
           </h2>
         </div>
@@ -245,15 +245,15 @@ const stats = [
                   </div>
                   <div class="space-y-1.5">
                     <div class="flex items-center gap-2 text-xs">
-                      <Lock class="size-3 text-primary" />
+                      <Lock class="size-3 text-primary" aria-hidden="true" />
                       <span>authn</span>
                     </div>
                     <div class="flex items-center gap-2 text-xs">
-                      <ShieldCheck class="size-3 text-primary" />
+                      <ShieldCheck class="size-3 text-primary" aria-hidden="true" />
                       <span>authz</span>
                     </div>
                     <div class="flex items-center gap-2 text-xs">
-                      <Workflow class="size-3 text-primary" />
+                      <Workflow class="size-3 text-primary" aria-hidden="true" />
                       <span>route</span>
                     </div>
                   </div>
@@ -297,15 +297,15 @@ const stats = [
     </section>
 
     <!-- CTA band -->
-    <section class="px-4 sm:px-6 lg:px-8 mb-20">
+    <section aria-labelledby="cta-title" class="px-4 sm:px-6 lg:px-8 mb-20">
       <div class="mx-auto max-w-7xl">
         <div class="relative hairline rounded-2xl overflow-hidden bg-gradient-to-br from-card via-card to-muted/40 p-10 sm:p-14">
-          <div class="absolute inset-0 grid-bg opacity-50 pointer-events-none" />
-          <div class="absolute -bottom-20 -right-20 size-96 glow-blob opacity-60 pointer-events-none" />
+          <div aria-hidden="true" class="absolute inset-0 grid-bg opacity-50 pointer-events-none" />
+          <div aria-hidden="true" class="absolute -bottom-20 -right-20 size-96 glow-blob opacity-60 pointer-events-none" />
 
           <div class="relative max-w-2xl">
             <p class="text-mono-label mb-5">// $ ./sanmon serve</p>
-            <h2 class="text-3xl sm:text-4xl lg:text-5xl font-semibold tracking-tight leading-tight">
+            <h2 id="cta-title" class="text-3xl sm:text-4xl lg:text-5xl font-semibold tracking-tight leading-tight">
               Stop shipping auth code.<br />
               Start shipping product.
             </h2>
@@ -317,10 +317,10 @@ const stats = [
             <div class="mt-8 flex flex-col sm:flex-row gap-3">
               <Button size="lg" class="group h-11 px-5">
                 Read the docs
-                <ArrowRight class="size-4 ml-1 group-hover:translate-x-0.5 transition-transform" />
+                <ArrowRight class="size-4 ml-1 group-hover:translate-x-0.5 transition-transform" aria-hidden="true" />
               </Button>
               <Button variant="outline" size="lg" class="h-11 px-5 font-mono text-xs hairline">
-                <KeyRound class="size-3.5 mr-2" />
+                <KeyRound class="size-3.5 mr-2" aria-hidden="true" />
                 request early access
               </Button>
             </div>
