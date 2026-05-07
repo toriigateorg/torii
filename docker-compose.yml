@@ -1,4 +1,8 @@
 services:
+  nginx: # a sample service to test proxy pass
+    restart: unless-stopped
+    image: nginx:1.29.8-alpine3.23
+
   app:
     restart: unless-stopped
     build:

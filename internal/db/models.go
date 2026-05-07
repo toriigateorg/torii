@@ -18,6 +18,17 @@ type RefreshToken struct {
 	RevokedAt pgtype.Timestamptz
 }
 
+type Service struct {
+	ID          uuid.UUID
+	Title       string
+	Description string
+	ServiceUrl  string
+	Domain      string
+	Headers     []byte
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
 type User struct {
 	ID           uuid.UUID
 	Username     string

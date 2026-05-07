@@ -11,10 +11,11 @@ import (
 	"sanmon/internal/auth"
 	"sanmon/internal/config"
 	"sanmon/internal/db"
+	"sanmon/internal/proxy"
 )
 
 // Register mounts the /api/v1 routes on the given echo instance.
-func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config) {
+func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy.ServiceCache) {
 	v1 := e.Group("/api/v1")
 
 	v1.GET("/health", func(c *echo.Context) error {
@@ -41,7 +42,7 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config) {
 		return
 	}
 
-	h := &authHandlers{q: db.New(pool), cfg: cfg}
+	h := &authHandlers{q: db.New(pool), cfg: cfg, cache: cache}
 
 	v1.POST("/signup", h.signup)
 	v1.POST("/signin", h.signin)
@@ -56,4 +57,8 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config) {
 	admin.GET("/tokens", h.adminListTokens)
 	admin.DELETE("/tokens/:id", h.adminRevokeToken)
 	admin.POST("/tokens/cleanup", h.adminCleanupTokens)
+	admin.GET("/services", h.adminListServices)
+	admin.POST("/services", h.adminCreateService)
+	admin.PATCH("/services/:id", h.adminUpdateService)
+	admin.DELETE("/services/:id", h.adminDeleteService)
 }

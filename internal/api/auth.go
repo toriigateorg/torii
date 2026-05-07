@@ -16,11 +16,13 @@ import (
 	"sanmon/internal/auth"
 	"sanmon/internal/config"
 	"sanmon/internal/db"
+	"sanmon/internal/proxy"
 )
 
 type authHandlers struct {
-	q   *db.Queries
-	cfg *config.Config
+	q     *db.Queries
+	cfg   *config.Config
+	cache *proxy.ServiceCache
 }
 
 type userDTO struct {

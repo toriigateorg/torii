@@ -12,6 +12,7 @@ type Config struct {
 	JWTSecret       []byte
 	AccessTokenTTL  time.Duration
 	RefreshTokenTTL time.Duration
+	SanmonURL       string
 }
 
 func Load() (*Config, error) {
@@ -25,11 +26,17 @@ func Load() (*Config, error) {
 		env = "dev"
 	}
 
+	sanmonURL := os.Getenv("SANMON_URL")
+	if sanmonURL == "" {
+		return nil, errors.New("SANMON_URL is required")
+	}
+
 	return &Config{
 		AppEnv:          env,
 		JWTSecret:       []byte(secret),
 		AccessTokenTTL:  time.Duration(intEnv("ACCESS_TOKEN_EXPIRY_MINS", 5)) * time.Minute,
 		RefreshTokenTTL: time.Duration(intEnv("REFRESH_TOKEN_EXPIRY_DAYS", 7)) * 24 * time.Hour,
+		SanmonURL:       sanmonURL,
 	}, nil
 }
 

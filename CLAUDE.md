@@ -86,6 +86,15 @@ docker-compose.prod.yml      prod (named volume, healthcheck, APP_ENV=production
 - **First user is admin**: `Signup` runs `CountUsers`; if zero, the new account is created with `user_type='admin'` regardless of payload. Subsequent signups default to `user`.
 - **Self-protection on admin endpoints**: admins cannot delete themselves or revoke their own current refresh token (server compares sha256 of caller's refresh cookie to row hash).
 
+## Reverse proxy
+
+- **Top-level dispatch** (`cmd/serve.go:dispatch`): every non-`/api/v1/*` request is routed by `Host`. `Host == SANMON_URL` -> SPA. Match in the `services` table + valid sanmon access token -> `httputil.ReverseProxy` to `service_url` (path/query forwarded as-is, `Host` rewritten to upstream, per-service `headers` overlaid on top of the client's headers). Unmatched / unauthenticated -> SPA (which renders signin or a 4xx via `error.vue` once authed).
+- **Service cache** (`internal/proxy/cache.go`): in-memory `map[domain]*CachedService`, refreshed on TTL (30 s) or explicit `Invalidate()` from the admin services CRUD handlers.
+- **Service config**: `domain` is hostname[:port] (no scheme/path); `service_url` is `http(s)://host[:port]` with no path/query/fragment. Both are validated server- and client-side.
+- **Auth on proxied requests**: any signed-in sanmon user. RBAC per service is intentionally not implemented yet.
+- **Cross-domain login**: cookies are scoped per host, so a user must sign in once per service domain. The signin page detects non-SANMON_URL hosts and does a hard `window.location.assign("/")` after success so the Go dispatch can re-evaluate and proxy.
+- **WebSockets / streaming**: handled natively by `httputil.ReverseProxy` (Connection/Upgrade headers preserved by the default director).
+
 ## Configuration (env)
 
 | Var | Default | Notes |
@@ -97,6 +106,7 @@ docker-compose.prod.yml      prod (named volume, healthcheck, APP_ENV=production
 | `DATABASE_URL` | *(required)* | pgx connection string |
 | `API_HOST` | `0.0.0.0` | |
 | `API_PORT` | `1356` | |
+| `SANMON_URL` | *(required)* | host[:port] sanmon itself answers on. Requests with this `Host` header serve the SPA; other hosts go through the reverse-proxy. Dev value: `localhost:1356`. Also exposed to the SPA via `runtimeConfig.public.sanmonUrl`. |
 
 Loaded by `godotenv.Load()` in `server.go` from `.env`/`.app.env`.
 

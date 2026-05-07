@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { Users, KeyRound } from "lucide-vue-next"
+import { Users, KeyRound, Server } from "lucide-vue-next"
 
 const route = useRoute()
 const links = [
   { to: "/admin/model/users", label: "Users", icon: Users },
   { to: "/admin/model/tokens", label: "Tokens", icon: KeyRound },
+  { to: "/admin/model/services", label: "Services", icon: Server },
 ]
 
 function isActive(to: string) {

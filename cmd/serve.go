@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"sanmon/internal/api"
+	"sanmon/internal/auth"
 	"sanmon/internal/config"
 	"sanmon/internal/db"
 	"sanmon/internal/proxy"
@@ -153,18 +155,25 @@ func runInner(ctx context.Context, host string, port int) error {
 	e := echo.New()
 	e.Use(middleware.RequestLogger())
 
-	api.Register(e, pool, cfg)
+	var cache *proxy.ServiceCache
+	if pool != nil {
+		cache = proxy.NewServiceCache(db.New(pool), 30*time.Second)
+	}
 
+	api.Register(e, pool, cfg, cache)
+
+	var spaHandler echo.HandlerFunc
 	if prod {
 		if !web.HasAssets() {
 			fmt.Fprintln(os.Stderr, "[web] WARNING: embedded SPA is empty — build the client (bun run generate) and copy client/.output/public/* into internal/web/dist/ before `go build`")
 		}
-		e.Any("/*", web.Handler())
+		spaHandler = web.Handler()
 	} else {
-		// Catch-all proxy to Nuxt for anything that didn't match /api/v1/*.
-		e.Any("/*", proxy.Nuxt())
+		spaHandler = proxy.Nuxt()
 		go waitForNuxt("127.0.0.1:3000", 10*time.Second)
 	}
+
+	e.Any("/*", dispatch(cfg, cache, spaHandler))
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", host, port),
@@ -283,6 +292,37 @@ func pipePrefixed(wg *sync.WaitGroup, r io.Reader, prefix string) {
 			}
 			return
 		}
+	}
+}
+
+// dispatch routes incoming non-API traffic by Host. Requests for the sanmon
+// domain are served by the SPA handler; requests whose Host matches a
+// configured service.domain are reverse-proxied (when the caller carries a
+// valid sanmon access token); everything else falls through to the SPA so the
+// signin page or 4xx page can render under the unknown domain.
+func dispatch(cfg *config.Config, cache *proxy.ServiceCache, spa echo.HandlerFunc) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		// Never let the SPA handler answer a request that was meant for the
+		// API but didn't match a registered route — that would return an
+		// HTML body to a JSON client and cause subtle bugs.
+		if strings.HasPrefix(c.Request().URL.Path, "/api/") {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "not found"})
+		}
+		if cfg == nil {
+			return spa(c)
+		}
+		host := c.Request().Host
+		if host == cfg.SanmonURL {
+			return spa(c)
+		}
+		if cache != nil {
+			if svc, ok := cache.Lookup(c.Request().Context(), host); ok {
+				if auth.ValidAccessToken(c, cfg.JWTSecret) {
+					return proxy.ProxyTo(svc, c)
+				}
+			}
+		}
+		return spa(c)
 	}
 }
 

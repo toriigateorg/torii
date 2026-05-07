@@ -15,6 +15,10 @@ const detail = computed(() => {
   if (props.error.statusCode === 401) {
     return "You don't have access to this page. Sign in with an admin account, or head back home."
   }
+  if (props.error.statusCode === 404 && props.error.statusMessage?.includes("No service configured")) {
+    const host = import.meta.client ? window.location.host : ""
+    return `No service is configured for ${host}. Contact your administrator.`
+  }
   return props.error.statusMessage || "An unexpected error occurred."
 })
 

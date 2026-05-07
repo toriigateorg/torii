@@ -21,6 +21,11 @@ async function onSubmit() {
   loading.value = true
   try {
     await signin(identifier.value.trim(), password.value)
+    const expected = useRuntimeConfig().public.sanmonUrl
+    if (expected && window.location.host !== expected) {
+      window.location.assign("/")
+      return
+    }
     await navigateTo("/dashboard")
   } catch (err: unknown) {
     const e = err as { data?: { error?: string }; message?: string }

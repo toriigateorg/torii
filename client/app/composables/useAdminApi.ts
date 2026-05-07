@@ -38,6 +38,29 @@ export interface TokenListResponse extends PageMeta {
   items: TokenSession[]
 }
 
+export interface Service {
+  id: string
+  title: string
+  description: string
+  service_url: string
+  domain: string
+  headers: Record<string, string>
+  created_at: string
+  updated_at: string
+}
+
+export interface ServiceListResponse extends PageMeta {
+  items: Service[]
+}
+
+export interface ServicePayload {
+  title: string
+  description: string
+  service_url: string
+  domain: string
+  headers: Record<string, string>
+}
+
 export function useAdminApi() {
   const { authHeaders } = useAuth()
 
@@ -82,6 +105,32 @@ export function useAdminApi() {
       return $fetch<{ deleted: number }>("/api/v1/admin/tokens/cleanup", {
         ...opts(),
         method: "POST",
+      })
+    },
+    listServices(page: number, pageSize = 20) {
+      return $fetch<ServiceListResponse>("/api/v1/admin/services", {
+        ...opts(),
+        query: { page, page_size: pageSize },
+      })
+    },
+    createService(payload: ServicePayload) {
+      return $fetch<Service>("/api/v1/admin/services", {
+        ...opts(),
+        method: "POST",
+        body: payload,
+      })
+    },
+    updateService(id: string, payload: ServicePayload) {
+      return $fetch<Service>(`/api/v1/admin/services/${id}`, {
+        ...opts(),
+        method: "PATCH",
+        body: payload,
+      })
+    },
+    deleteService(id: string) {
+      return $fetch(`/api/v1/admin/services/${id}`, {
+        ...opts(),
+        method: "DELETE",
       })
     },
   }

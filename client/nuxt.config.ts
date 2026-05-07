@@ -8,6 +8,12 @@ export default defineNuxtConfig({
   css: ["~/assets/css/tailwind.css"],
   ssr: false,
 
+  runtimeConfig: {
+    public: {
+      sanmonUrl: process.env.SANMON_URL ?? "",
+    },
+  },
+
   app: {
     head: {
       htmlAttrs: { lang: "en" },

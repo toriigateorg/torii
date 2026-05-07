@@ -54,6 +54,11 @@ func authenticate(c *echo.Context, secret []byte) (*Claims, error) {
 
 var errMissingToken = errors.New("missing token")
 
+func ValidAccessToken(c *echo.Context, secret []byte) bool {
+	_, err := authenticate(c, secret)
+	return err == nil
+}
+
 func ClaimsFrom(c *echo.Context) *Claims {
 	v := c.Get(ClaimsContextKey)
 	if v == nil {
