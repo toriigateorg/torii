@@ -67,11 +67,6 @@ async function onSubmit() {
 }
 
 function ssoSignin(slug: string) {
-  const sanmonHost = useRuntimeConfig().public.sanmonUrl
-  if (sanmonHost && window.location.host !== sanmonHost) {
-    window.location.assign(`${window.location.protocol}//${sanmonHost}/api/v1/oauth/${slug}/start`)
-    return
-  }
   window.location.assign(`/api/v1/oauth/${slug}/start`)
 }
 </script>

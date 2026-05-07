@@ -52,15 +52,24 @@ func (h *authHandlers) oidcProviderFor(ctx context.Context, p db.SsoProvider) (*
 	return prov, nil
 }
 
-func (h *authHandlers) oauthRedirectURL(slug string) string {
+func (h *authHandlers) oauthRedirectURL(c *echo.Context, slug string) string {
+	r := c.Request()
 	scheme := "http"
-	if h.cfg.IsProd() {
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		scheme = proto
+	} else if r.TLS != nil {
+		scheme = "https"
+	} else if h.cfg.IsProd() {
 		scheme = "https"
 	}
-	return scheme + "://" + h.cfg.SanmonURL + "/api/v1/oauth/" + slug + "/callback"
+	host := r.Host
+	if fwd := r.Header.Get("X-Forwarded-Host"); fwd != "" {
+		host = fwd
+	}
+	return scheme + "://" + host + "/api/v1/oauth/" + slug + "/callback"
 }
 
-func (h *authHandlers) oauth2Config(prov *oidc.Provider, p db.SsoProvider) *oauth2.Config {
+func (h *authHandlers) oauth2Config(c *echo.Context, prov *oidc.Provider, p db.SsoProvider) *oauth2.Config {
 	scopes := strings.Fields(p.Scopes)
 	if len(scopes) == 0 {
 		scopes = []string{oidc.ScopeOpenID, "email", "profile"}
@@ -69,7 +78,7 @@ func (h *authHandlers) oauth2Config(prov *oidc.Provider, p db.SsoProvider) *oaut
 		ClientID:     p.ClientID,
 		ClientSecret: p.ClientSecret,
 		Endpoint:     prov.Endpoint(),
-		RedirectURL:  h.oauthRedirectURL(p.Slug),
+		RedirectURL:  h.oauthRedirectURL(c, p.Slug),
 		Scopes:       scopes,
 	}
 }
@@ -161,7 +170,7 @@ func (h *authHandlers) oauthStart(c *echo.Context) error {
 	h.setSSOTempCookie(c, ssoStateCookie, state)
 	h.setSSOTempCookie(c, ssoNonceCookie, nonce)
 
-	cfg := h.oauth2Config(prov, p)
+	cfg := h.oauth2Config(c, prov, p)
 	return c.Redirect(http.StatusFound, cfg.AuthCodeURL(state, oidc.Nonce(nonce)))
 }
 
@@ -224,7 +233,7 @@ func (h *authHandlers) oauthCallback(c *echo.Context) error {
 	if err != nil {
 		return c.Redirect(http.StatusFound, "/signin?error=sso_discovery")
 	}
-	cfg := h.oauth2Config(prov, p)
+	cfg := h.oauth2Config(c, prov, p)
 
 	tok, err := cfg.Exchange(ctx, code)
 	if err != nil {

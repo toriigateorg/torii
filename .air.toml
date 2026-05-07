@@ -29,7 +29,7 @@ args_bin = ["serve", "--inner"]
 # Watch these filename extensions. Use ["*"] to watch all file extensions.
 include_ext = ["go", "tpl", "tmpl", "html"]
 # Ignore these filename extensions or directories.
-exclude_dir = ["assets", "tmp", "vendor", "frontend/node_modules", "client", "postgres-data"]
+exclude_dir = ["assets", "tmp", "vendor", "frontend/node_modules", "client", "postgres-data", "logs"]
 # Watch these directories if you specified.
 include_dir = []
 # Watch these files.

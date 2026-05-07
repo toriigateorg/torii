@@ -270,8 +270,9 @@ async function confirmDelete() {
           <DialogTitle>{{ formMode === "create" ? "Add SSO provider" : "Edit SSO provider" }}</DialogTitle>
           <DialogDescription>
             Any OIDC-compliant identity provider works (Google, Zitadel, Keycloak, Auth0, …).
-            The redirect URI to register with the provider is
-            <span class="font-mono">https://&lt;sanmon&gt;/api/v1/oauth/&lt;slug&gt;/callback</span>.
+            The redirect URI is <span class="font-mono">https://&lt;host&gt;/api/v1/oauth/&lt;slug&gt;/callback</span>,
+            where <span class="font-mono">&lt;host&gt;</span> is whichever domain the user signs in from.
+            Register a callback for every domain that fronts sanmon (the main UI plus each proxied service host).
           </DialogDescription>
         </DialogHeader>
         <form class="flex flex-col gap-4" @submit.prevent="submit">
