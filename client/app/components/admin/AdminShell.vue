@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Users, KeyRound, Server, Shield, LogIn } from "lucide-vue-next"
+import { Users, KeyRound, Server, Shield, LogIn, Settings } from "lucide-vue-next"
 
 const route = useRoute()
 const links = [
@@ -8,6 +8,7 @@ const links = [
   { to: "/admin/model/tokens", label: "Tokens", icon: KeyRound },
   { to: "/admin/model/services", label: "Services", icon: Server },
   { to: "/admin/model/sso", label: "SSO", icon: LogIn },
+  { to: "/admin/settings", label: "Settings", icon: Settings },
 ]
 
 function isActive(to: string) {

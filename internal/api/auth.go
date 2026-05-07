@@ -128,6 +128,9 @@ func (h *authHandlers) signup(c *echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	}
+	if count > 0 && !h.getBoolSetting(ctx, settingSignupEnabled, true) {
+		return c.JSON(http.StatusForbidden, map[string]string{"error": "new account signups are disabled"})
+	}
 
 	user, err := qtx.CreateUser(ctx, db.CreateUserParams{
 		Username:     req.Username,

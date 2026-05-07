@@ -103,6 +103,14 @@ export interface SSOProviderListResponse extends PageMeta {
   items: SSOProvider[]
 }
 
+export interface AppSettings {
+  signup_enabled: boolean
+}
+
+export interface UpdateAppSettingsPayload {
+  signup_enabled?: boolean
+}
+
 export interface SSOProviderPayload {
   slug: string
   name: string
@@ -288,6 +296,16 @@ export function useAdminApi() {
       return $fetch(`/api/v1/admin/sso/${id}`, {
         ...opts(),
         method: "DELETE",
+      })
+    },
+    getSettings() {
+      return $fetch<AppSettings>("/api/v1/admin/settings", opts())
+    },
+    updateSettings(payload: UpdateAppSettingsPayload) {
+      return $fetch<AppSettings>("/api/v1/admin/settings", {
+        ...opts(),
+        method: "PUT",
+        body: payload,
       })
     },
   }

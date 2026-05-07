@@ -13,6 +13,7 @@ const password = ref("")
 const error = ref<string | null>(null)
 const loading = ref(false)
 const providers = ref<PublicProvider[]>([])
+const signupEnabled = ref(true)
 
 const ssoErrorMessages: Record<string, string> = {
   sso_no_account: "No matching sanmon account for that identity.",
@@ -34,8 +35,9 @@ onMounted(async () => {
     error.value = ssoErrorMessages[code]
   }
   try {
-    const res = await $fetch<{ items: PublicProvider[] }>("/api/v1/auth/providers")
-    providers.value = res.items ?? []
+    const cfg = await $fetch<{ providers: PublicProvider[]; signup_enabled: boolean }>("/api/v1/auth/config")
+    providers.value = cfg.providers ?? []
+    signupEnabled.value = cfg.signup_enabled
   } catch {
     providers.value = []
   }
@@ -143,7 +145,7 @@ function ssoSignin(slug: string) {
             {{ loading ? "Signing in..." : "Sign in" }}
           </Button>
         </form>
-        <p class="mt-6 text-sm text-muted-foreground">
+        <p v-if="signupEnabled" class="mt-6 text-sm text-muted-foreground">
           New here?
           <NuxtLink to="/signup" class="text-foreground underline underline-offset-4 hover:text-primary">
             Create an account

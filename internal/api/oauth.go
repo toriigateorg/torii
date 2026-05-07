@@ -78,6 +78,19 @@ type publicProviderDTO struct {
 	Name string `json:"name"`
 }
 
+func (h *authHandlers) publicAuthConfig(c *echo.Context) error {
+	ctx := c.Request().Context()
+	rows, _ := h.q.ListEnabledSSOProviders(ctx)
+	items := make([]publicProviderDTO, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, publicProviderDTO{Slug: r.Slug, Name: r.Name})
+	}
+	return c.JSON(http.StatusOK, map[string]any{
+		"providers":      items,
+		"signup_enabled": h.getBoolSetting(ctx, settingSignupEnabled, true),
+	})
+}
+
 func (h *authHandlers) publicListProviders(c *echo.Context) error {
 	rows, err := h.q.ListEnabledSSOProviders(c.Request().Context())
 	if err != nil {

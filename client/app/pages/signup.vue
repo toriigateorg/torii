@@ -7,6 +7,20 @@ useHead({ title: "Sign up — sanmon" })
 
 const { signup } = useAuth()
 
+const signupEnabled = ref(true)
+const configLoaded = ref(false)
+
+onMounted(async () => {
+  try {
+    const cfg = await $fetch<{ signup_enabled: boolean }>("/api/v1/auth/config")
+    signupEnabled.value = cfg.signup_enabled
+  } catch {
+    /* fall back to enabled; server still gates */
+  } finally {
+    configLoaded.value = true
+  }
+})
+
 const username = ref("")
 const email = ref("")
 const firstName = ref("")
@@ -81,7 +95,18 @@ async function onSubmit() {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form class="flex flex-col gap-4" novalidate aria-describedby="signup-error" @submit.prevent="onSubmit">
+        <div v-if="configLoaded && !signupEnabled" class="flex flex-col gap-4">
+          <Alert>
+            <AlertDescription>
+              New account sign-ups are currently disabled. If you already have an account you can
+              still sign in.
+            </AlertDescription>
+          </Alert>
+          <NuxtLink to="/signin" class="text-sm text-foreground underline underline-offset-4 hover:text-primary">
+            Go to sign in
+          </NuxtLink>
+        </div>
+        <form v-else class="flex flex-col gap-4" novalidate aria-describedby="signup-error" @submit.prevent="onSubmit">
           <div class="flex flex-col gap-1.5">
             <Label for="username">Username</Label>
             <Input id="username" v-model="username" autocomplete="username" autofocus />
@@ -134,7 +159,7 @@ async function onSubmit() {
             {{ loading ? "Creating..." : "Create account" }}
           </Button>
         </form>
-        <p class="mt-6 text-sm text-muted-foreground">
+        <p v-if="signupEnabled" class="mt-6 text-sm text-muted-foreground">
           Already have an account?
           <NuxtLink to="/signin" class="text-foreground underline underline-offset-4 hover:text-primary">
             Sign in

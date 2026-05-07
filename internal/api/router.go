@@ -88,6 +88,10 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	v1.PATCH("/admin/sso/:id", h.adminUpdateSSO, gate(auth.PermSSOUpdate))
 	v1.DELETE("/admin/sso/:id", h.adminDeleteSSO, gate(auth.PermSSODelete))
 
+	v1.GET("/admin/settings", h.adminGetSettings, gate(auth.PermSettingsRead))
+	v1.PUT("/admin/settings", h.adminUpdateSettings, gate(auth.PermSettingsUpdate))
+
+	v1.GET("/auth/config", h.publicAuthConfig)
 	v1.GET("/auth/providers", h.publicListProviders)
 	v1.GET("/oauth/:slug/start", h.oauthStart)
 	v1.GET("/oauth/:slug/callback", h.oauthCallback)
