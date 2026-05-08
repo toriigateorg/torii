@@ -25,7 +25,7 @@ func (q *Queries) CountServices(ctx context.Context) (int64, error) {
 const createService = `-- name: CreateService :one
 INSERT INTO services (title, description, service_url, domain, headers)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, title, description, service_url, domain, headers, created_at, updated_at
+RETURNING id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret
 `
 
 type CreateServiceParams struct {
@@ -54,6 +54,7 @@ func (q *Queries) CreateService(ctx context.Context, arg CreateServiceParams) (S
 		&i.Headers,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SigningSecret,
 	)
 	return i, err
 }
@@ -68,7 +69,7 @@ func (q *Queries) DeleteService(ctx context.Context, id uuid.UUID) error {
 }
 
 const getServiceByDomain = `-- name: GetServiceByDomain :one
-SELECT id, title, description, service_url, domain, headers, created_at, updated_at FROM services WHERE domain = $1
+SELECT id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret FROM services WHERE domain = $1
 `
 
 func (q *Queries) GetServiceByDomain(ctx context.Context, domain string) (Service, error) {
@@ -83,12 +84,13 @@ func (q *Queries) GetServiceByDomain(ctx context.Context, domain string) (Servic
 		&i.Headers,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SigningSecret,
 	)
 	return i, err
 }
 
 const getServiceByID = `-- name: GetServiceByID :one
-SELECT id, title, description, service_url, domain, headers, created_at, updated_at FROM services WHERE id = $1
+SELECT id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret FROM services WHERE id = $1
 `
 
 func (q *Queries) GetServiceByID(ctx context.Context, id uuid.UUID) (Service, error) {
@@ -103,12 +105,13 @@ func (q *Queries) GetServiceByID(ctx context.Context, id uuid.UUID) (Service, er
 		&i.Headers,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SigningSecret,
 	)
 	return i, err
 }
 
 const listServices = `-- name: ListServices :many
-SELECT id, title, description, service_url, domain, headers, created_at, updated_at FROM services
+SELECT id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret FROM services
 ORDER BY created_at ASC, id ASC
 LIMIT $2::int OFFSET $1::int
 `
@@ -136,6 +139,7 @@ func (q *Queries) ListServices(ctx context.Context, arg ListServicesParams) ([]S
 			&i.Headers,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SigningSecret,
 		); err != nil {
 			return nil, err
 		}
@@ -147,6 +151,36 @@ func (q *Queries) ListServices(ctx context.Context, arg ListServicesParams) ([]S
 	return items, nil
 }
 
+const rotateServiceSigningSecret = `-- name: RotateServiceSigningSecret :one
+UPDATE services
+SET signing_secret = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret
+`
+
+type RotateServiceSigningSecretParams struct {
+	ID            uuid.UUID
+	SigningSecret []byte
+}
+
+func (q *Queries) RotateServiceSigningSecret(ctx context.Context, arg RotateServiceSigningSecretParams) (Service, error) {
+	row := q.db.QueryRow(ctx, rotateServiceSigningSecret, arg.ID, arg.SigningSecret)
+	var i Service
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.Description,
+		&i.ServiceUrl,
+		&i.Domain,
+		&i.Headers,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SigningSecret,
+	)
+	return i, err
+}
+
 const updateService = `-- name: UpdateService :one
 UPDATE services
 SET title = $2,
@@ -156,7 +190,7 @@ SET title = $2,
     headers = $6,
     updated_at = now()
 WHERE id = $1
-RETURNING id, title, description, service_url, domain, headers, created_at, updated_at
+RETURNING id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret
 `
 
 type UpdateServiceParams struct {
@@ -187,6 +221,7 @@ func (q *Queries) UpdateService(ctx context.Context, arg UpdateServiceParams) (S
 		&i.Headers,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SigningSecret,
 	)
 	return i, err
 }

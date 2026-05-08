@@ -1,6 +1,8 @@
 package api
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -198,6 +200,44 @@ func (h *authHandlers) adminUpdateService(c *echo.Context) error {
 		Metadata:   map[string]any{"before": audit.SnapshotService(prev), "after": audit.SnapshotService(svc)},
 	})
 	return c.JSON(http.StatusOK, toServiceDTO(svc))
+}
+
+// adminRotateServiceSigningSecret generates a new 32-byte secret, persists it
+// on the service, and returns it once to the caller. The secret is used by
+// torii to HMAC-sign the X-Torii-* identity headers it injects when proxying.
+// Upstream operators must store the returned value and verify
+// X-Torii-Signature on incoming requests if they rely on the headers for
+// authorization.
+func (h *authHandlers) adminRotateServiceSigningSecret(c *echo.Context) error {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid id"})
+	}
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
+	svc, err := h.q.RotateServiceSigningSecret(c.Request().Context(), db.RotateServiceSigningSecretParams{
+		ID:            id,
+		SigningSecret: secret,
+	})
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not rotate signing secret"})
+	}
+	if h.cache != nil {
+		h.cache.Invalidate()
+	}
+	sid := svc.ID
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:  audit.EventServiceUpdated,
+		TargetType: audit.TargetService,
+		TargetID:   &sid,
+		TargetName: svc.Title,
+		Metadata:   map[string]any{"action": "rotate_signing_secret"},
+	})
+	return c.JSON(http.StatusOK, map[string]string{
+		"signing_secret": base64.StdEncoding.EncodeToString(secret),
+	})
 }
 
 func (h *authHandlers) adminDeleteService(c *echo.Context) error {

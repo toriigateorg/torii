@@ -13,12 +13,13 @@ import (
 )
 
 type CachedService struct {
-	ID      uuid.UUID
-	Title   string
-	Domain  string
-	Target  *url.URL
-	Headers map[string]string
-	RoleIDs map[uuid.UUID]struct{}
+	ID            uuid.UUID
+	Title         string
+	Domain        string
+	Target        *url.URL
+	Headers       map[string]string
+	SigningSecret []byte
+	RoleIDs       map[uuid.UUID]struct{}
 }
 
 func (s *CachedService) AllowsAnyRole(roleIDs []uuid.UUID) bool {
@@ -97,12 +98,13 @@ func (c *ServiceCache) refreshLocked(ctx context.Context) {
 			roleSet[id] = struct{}{}
 		}
 		next[r.Domain] = &CachedService{
-			ID:      r.ID,
-			Title:   r.Title,
-			Domain:  r.Domain,
-			Target:  target,
-			Headers: headers,
-			RoleIDs: roleSet,
+			ID:            r.ID,
+			Title:         r.Title,
+			Domain:        r.Domain,
+			Target:        target,
+			Headers:       headers,
+			SigningSecret: r.SigningSecret,
+			RoleIDs:       roleSet,
 		}
 	}
 	c.byDomain = next

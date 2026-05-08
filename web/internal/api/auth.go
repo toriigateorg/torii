@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -365,7 +366,7 @@ func (h *authHandlers) issueSession(ctx context.Context, c *echo.Context, user d
 		return "", nil, nil, err
 	}
 
-	access, _, err := auth.IssueAccessToken(user.ID, user.Username, perms, roleIDs, h.cfg.JWTSecret, h.cfg.AccessTokenTTL)
+	access, _, err := auth.IssueAccessToken(user.ID, user.Username, user.Email, perms, roleIDs, h.cfg.JWTSecret, h.cfg.AccessTokenTTL)
 	if err != nil {
 		return "", nil, nil, err
 	}
@@ -392,16 +393,33 @@ func (h *authHandlers) issueSession(ctx context.Context, c *echo.Context, user d
 // proxy dispatch redirects the browser here whenever an access token expires
 // on a proxied service domain.
 func (h *authHandlers) refreshAndRedirect(c *echo.Context) error {
-	to := c.QueryParam("to")
-	// Only allow same-origin relative redirects. Reject schemes, host-relative
-	// "//host/..." forms, and anything that doesn't start with a single "/".
-	if to == "" || !strings.HasPrefix(to, "/") || strings.HasPrefix(to, "//") {
-		to = "/"
-	}
+	to := safeRelativeRedirect(c.QueryParam("to"))
 	if _, err := h.AttemptCookieRefresh(c); err != nil {
 		return c.Redirect(http.StatusFound, "/signin")
 	}
 	return c.Redirect(http.StatusFound, to)
+}
+
+// safeRelativeRedirect returns target if and only if it is a same-origin
+// relative URL with a single leading "/". Anything else (absolute URLs,
+// protocol-relative "//host/..." forms, paths beginning with a backslash that
+// browsers normalize to "//", embedded CR/LF) collapses to "/". This is the
+// /api/v1/refresh_and_redirect open-redirect guard.
+func safeRelativeRedirect(target string) string {
+	if target == "" {
+		return "/"
+	}
+	if strings.ContainsAny(target, "\\\r\n") {
+		return "/"
+	}
+	u, err := url.Parse(target)
+	if err != nil || u.Scheme != "" || u.Host != "" {
+		return "/"
+	}
+	if !strings.HasPrefix(u.Path, "/") || strings.HasPrefix(u.Path, "//") {
+		return "/"
+	}
+	return u.RequestURI()
 }
 
 // AttemptCookieRefresh validates the refresh cookie on the request, rotates

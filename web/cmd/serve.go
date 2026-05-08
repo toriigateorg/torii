@@ -355,7 +355,7 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logg
 			return spa(c)
 		}
 		host := c.Request().Host
-		if host == cfg.ToriiURL {
+		if cfg.IsToriiHost(host) {
 			return spa(c)
 		}
 		if cache != nil {
@@ -426,7 +426,12 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logg
 						auditor.LogProxyAccess(c, uid, claims.Username, svc.ID, svc.Title)
 					}
 				}
-				return proxy.ProxyTo(svc, c)
+				return proxy.ProxyTo(svc, proxy.Identity{
+					UserID:   claims.Subject,
+					Username: claims.Username,
+					Email:    claims.Email,
+					Roles:    claims.RoleIDs,
+				}, c)
 			}
 		}
 		return spa(c)

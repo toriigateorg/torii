@@ -30,3 +30,10 @@ RETURNING *;
 
 -- name: DeleteService :exec
 DELETE FROM services WHERE id = $1;
+
+-- name: RotateServiceSigningSecret :one
+UPDATE services
+SET signing_secret = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;

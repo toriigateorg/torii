@@ -120,6 +120,7 @@ SELECT
     s.service_url,
     s.domain,
     s.headers,
+    s.signing_secret,
     s.created_at,
     s.updated_at,
     COALESCE(

@@ -10,6 +10,7 @@ import (
 
 type Claims struct {
 	Username    string   `json:"username"`
+	Email       string   `json:"email,omitempty"`
 	Permissions []string `json:"permissions"`
 	RoleIDs     []string `json:"role_ids"`
 	jwt.RegisteredClaims
@@ -24,7 +25,7 @@ func (c *Claims) Has(perm string) bool {
 	return false
 }
 
-func IssueAccessToken(userID uuid.UUID, username string, perms []string, roleIDs []uuid.UUID, secret []byte, ttl time.Duration) (string, time.Time, error) {
+func IssueAccessToken(userID uuid.UUID, username, email string, perms []string, roleIDs []uuid.UUID, secret []byte, ttl time.Duration) (string, time.Time, error) {
 	expiresAt := time.Now().Add(ttl)
 	roleStrs := make([]string, len(roleIDs))
 	for i, r := range roleIDs {
@@ -35,6 +36,7 @@ func IssueAccessToken(userID uuid.UUID, username string, perms []string, roleIDs
 	}
 	claims := Claims{
 		Username:    username,
+		Email:       email,
 		Permissions: perms,
 		RoleIDs:     roleStrs,
 		RegisteredClaims: jwt.RegisteredClaims{

@@ -2,8 +2,10 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -12,7 +14,7 @@ type Config struct {
 	JWTSecret       []byte
 	AccessTokenTTL  time.Duration
 	RefreshTokenTTL time.Duration
-	ToriiURL       string
+	ToriiURL        string
 	AuditLogDir     string
 }
 
@@ -20,6 +22,15 @@ func Load() (*Config, error) {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
 		return nil, errors.New("JWT_SECRET is required")
+	}
+	if len(secret) < 32 {
+		return nil, errors.New("JWT_SECRET must be at least 32 bytes")
+	}
+	if isLowEntropy(secret) {
+		return nil, errors.New("JWT_SECRET appears to be low-entropy (all bytes equal); use a random value")
+	}
+	if len(secret) < 64 {
+		fmt.Fprintln(os.Stderr, "[config] WARNING: JWT_SECRET is shorter than 64 bytes; consider rotating to a 64+ byte random value")
 	}
 
 	env := os.Getenv("APP_ENV")
@@ -48,6 +59,33 @@ func Load() (*Config, error) {
 }
 
 func (c *Config) IsProd() bool { return c.AppEnv != "dev" }
+
+// IsToriiHost reports whether the given request Host header refers to the
+// torii control plane. Comparison is case-insensitive and tolerates the
+// default :80/:443 ports being implicit on either side.
+func (c *Config) IsToriiHost(host string) bool {
+	return canonicalHost(host) == canonicalHost(c.ToriiURL)
+}
+
+func isLowEntropy(s string) bool {
+	if len(s) == 0 {
+		return true
+	}
+	first := s[0]
+	for i := 1; i < len(s); i++ {
+		if s[i] != first {
+			return false
+		}
+	}
+	return true
+}
+
+func canonicalHost(h string) string {
+	h = strings.ToLower(strings.TrimSpace(h))
+	h = strings.TrimSuffix(h, ":443")
+	h = strings.TrimSuffix(h, ":80")
+	return h
+}
 
 func intEnv(key string, def int) int {
 	if v := os.Getenv(key); v != "" {
