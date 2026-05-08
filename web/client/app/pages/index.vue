@@ -19,27 +19,13 @@ useSeoMeta({
   ogDescription: "Open-source zero trust gateway. Self-host SSO, RBAC, and reverse proxy as one Go binary.",
   twitterTitle: "torii — identity-aware reverse proxy",
   twitterDescription: "Open-source zero trust gateway. Self-host SSO, RBAC, and reverse proxy as one Go binary.",
-  keywords: "identity-aware reverse proxy, zero trust gateway, open source SSO, RBAC proxy, auth gateway, self-hosted authentication, OIDC proxy, SAML proxy",
 })
 
-defineOgImageComponent("ToriiOg", {
-  title: "Identity-aware reverse proxy",
-  description: "Auth, RBAC, and routing in one open-source Go binary.",
+useHead({
+  meta: [
+    { name: "keywords", content: "identity-aware reverse proxy, zero trust gateway, open source SSO, RBAC proxy, auth gateway, self-hosted authentication, OIDC proxy, SAML proxy" },
+  ],
 })
-
-useSchemaOrg([
-  defineSoftwareApp({
-    name: "torii",
-    applicationCategory: "DeveloperApplication",
-    operatingSystem: "Linux, macOS, Windows (Docker)",
-    offers: {
-      "@type": "Offer",
-      price: "0",
-      priceCurrency: "USD",
-    },
-    description: "Open-source identity-aware reverse proxy with built-in auth and RBAC. Front your services with policy, not plumbing.",
-  }),
-])
 
 const features = [
   {

@@ -54,25 +54,19 @@ export default defineNuxtConfig({
   },
 
   robots: {
-    disallow: ["/dashboard", "/admin/", "/api/"],
-  },
-
-  schemaOrg: {
-    identity: "Organization",
+    disallow: ["/dashboard", "/admin/", "/api/v1/"],
   },
 
   ogImage: {
-    defaults: {
-      width: 1200,
-      height: 630,
-    },
+    enabled: false,
   },
 
-  nitro: {
-    prerender: {
-      crawlLinks: false,
-      routes: ["/", "/signin", "/signup", "/sitemap.xml", "/robots.txt"],
-    },
+  schemaOrg: {
+    enabled: false,
+  },
+
+  linkChecker: {
+    enabled: false,
   },
 
   colorMode: {
