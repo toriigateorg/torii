@@ -57,37 +57,15 @@ function goHome() {
 </script>
 
 <template>
-  <main
-    id="main-content"
-    tabindex="-1"
-    class="relative min-h-screen bg-background text-foreground overflow-hidden focus:outline-none"
-  >
-    <div aria-hidden="true" class="absolute inset-0 grid-bg pointer-events-none" />
-    <div
-      aria-hidden="true"
-      class="absolute -top-32 left-1/2 -translate-x-1/2 size-[700px] glow-blob float-slow pointer-events-none opacity-60"
-    />
+  <NuxtLayout name="default">
+    <section class="relative overflow-hidden">
+      <div aria-hidden="true" class="absolute inset-0 grid-bg pointer-events-none" />
+      <div
+        aria-hidden="true"
+        class="absolute -top-32 left-1/2 -translate-x-1/2 size-[700px] glow-blob float-slow pointer-events-none opacity-60"
+      />
 
-    <div class="relative mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 min-h-screen flex flex-col">
-      <header class="flex items-center justify-between py-6">
-        <NuxtLink to="/" class="flex items-center gap-2 group" aria-label="torii — home">
-          <img
-            src="/torii-logo.svg"
-            alt=""
-            aria-hidden="true"
-            width="24"
-            height="24"
-            class="size-6 rounded-md"
-          />
-          <span class="font-semibold tracking-tight text-sm">torii</span>
-        </NuxtLink>
-        <span class="font-mono text-[10px] tracking-[0.2em] uppercase text-muted-foreground">
-          err / {{ code }}
-        </span>
-      </header>
-
-      <div class="flex-1 flex items-center">
-        <div class="w-full">
+      <div class="relative mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 py-12 sm:py-16 lg:py-20">
           <!-- Console card -->
           <div class="hairline rounded-xl bg-card/60 backdrop-blur-sm overflow-hidden shadow-2xl shadow-primary/5">
             <!-- Header strip -->
@@ -153,22 +131,8 @@ function goHome() {
               <span>fig.err · {{ code }}</span>
               <span class="hidden sm:inline">torii edge</span>
             </div>
-          </div>
         </div>
       </div>
-
-      <footer class="py-6 flex items-center justify-between text-mono-label">
-        <span>&copy; 2026 torii</span>
-        <span>
-          crafted by
-          <a
-            href="https://codingcoffee.dev"
-            target="_blank"
-            rel="noopener"
-            class="text-foreground/80 hover:text-foreground underline-offset-4 hover:underline transition-colors"
-          >Ameya Shenoy</a>
-        </span>
-      </footer>
-    </div>
-  </main>
+    </section>
+  </NuxtLayout>
 </template>
