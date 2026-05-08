@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -9,6 +10,16 @@ import (
 )
 
 const ClaimsContextKey = "claims"
+
+// APITokenResolver resolves a `torii_pat_...` plaintext token to a Claims
+// value (subject = user UUID string, permissions populated). It is wired in
+// at server startup by the api package so this package doesn't need to depend
+// on db / sqlc-generated code.
+type APITokenResolver func(ctx context.Context, raw string) (*Claims, error)
+
+var apiTokenResolver APITokenResolver
+
+func SetAPITokenResolver(r APITokenResolver) { apiTokenResolver = r }
 
 func RequireUser(secret []byte) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -52,6 +63,12 @@ func authenticate(c *echo.Context, secret []byte) (*Claims, error) {
 	}
 	if tok == "" {
 		return nil, errMissingToken
+	}
+	if IsAPIToken(tok) {
+		if apiTokenResolver == nil {
+			return nil, errors.New("api tokens not enabled")
+		}
+		return apiTokenResolver(c.Request().Context(), tok)
 	}
 	return ParseAccessToken(tok, secret)
 }

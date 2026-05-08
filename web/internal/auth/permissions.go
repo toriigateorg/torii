@@ -38,6 +38,10 @@ const (
 	PermSettingsUpdate = "settings.update"
 
 	PermAuditRead = "audit.read"
+
+	PermAPITokensCreate = "api_tokens.create"
+	PermAPITokensRead   = "api_tokens.read"
+	PermAPITokensDelete = "api_tokens.delete"
 )
 
 var AllPermissions = []string{
@@ -51,6 +55,7 @@ var AllPermissions = []string{
 	PermSSOCreate, PermSSORead, PermSSOUpdate, PermSSODelete,
 	PermSettingsRead, PermSettingsUpdate,
 	PermAuditRead,
+	PermAPITokensCreate, PermAPITokensRead, PermAPITokensDelete,
 }
 
 var permissionSet = func() map[string]struct{} {

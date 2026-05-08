@@ -152,6 +152,32 @@ export interface SSOProviderPayload {
   link_by_email: boolean
 }
 
+export interface APIToken {
+  id: string
+  user_id: string
+  username: string
+  email: string
+  name: string
+  prefix: string
+  created_at: string
+  expires_at: string | null
+  last_used_at: string | null
+}
+
+export interface APITokenListResponse extends PageMeta {
+  items: APIToken[]
+}
+
+export interface CreateAPITokenPayload {
+  user_id: string
+  name: string
+  expires_at?: string | null
+}
+
+export interface CreateAPITokenResponse extends APIToken {
+  token: string
+}
+
 export type StatsWindow = "7d" | "30d" | "90d"
 
 export interface StatsResponse {
@@ -357,6 +383,25 @@ export function useAdminApi() {
         ...opts(),
         method: "PUT",
         body: payload,
+      })
+    },
+    listAPITokens(page: number, pageSize = 20) {
+      return $fetch<APITokenListResponse>("/api/v1/admin/api_tokens", {
+        ...opts(),
+        query: { page, page_size: pageSize },
+      })
+    },
+    createAPIToken(payload: CreateAPITokenPayload) {
+      return $fetch<CreateAPITokenResponse>("/api/v1/admin/api_tokens", {
+        ...opts(),
+        method: "POST",
+        body: payload,
+      })
+    },
+    deleteAPIToken(id: string) {
+      return $fetch(`/api/v1/admin/api_tokens/${id}`, {
+        ...opts(),
+        method: "DELETE",
       })
     },
     listAuditLogs(query: AuditLogQuery = {}) {

@@ -53,6 +53,7 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	}
 
 	h := &authHandlers{pool: pool, q: db.New(pool), cfg: cfg, cache: cache, auditor: auditor}
+	auth.SetAPITokenResolver(h.resolveAPIToken)
 
 	v1.POST("/signup", h.signup)
 	v1.POST("/signin", h.signin)
@@ -88,6 +89,10 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	v1.GET("/admin/tokens", h.adminListTokens, gate(auth.PermTokensRead))
 	v1.DELETE("/admin/tokens/:id", h.adminRevokeToken, gate(auth.PermTokensDelete))
 	v1.POST("/admin/tokens/cleanup", h.adminCleanupTokens, gate(auth.PermTokensDelete))
+
+	v1.GET("/admin/api_tokens", h.adminListAPITokens, gate(auth.PermAPITokensRead))
+	v1.POST("/admin/api_tokens", h.adminCreateAPIToken, gate(auth.PermAPITokensCreate))
+	v1.DELETE("/admin/api_tokens/:id", h.adminDeleteAPIToken, gate(auth.PermAPITokensDelete))
 
 	v1.GET("/admin/services", h.adminListServices, gate(auth.PermServicesRead))
 	v1.POST("/admin/services", h.adminCreateService, gate(auth.PermServicesCreate))
