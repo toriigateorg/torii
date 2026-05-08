@@ -40,7 +40,7 @@ async function onSignout() {
 
         <div class="flex items-center gap-2">
           <a
-            href="https://github.com"
+            href="https://github.com/toriigateorg/torii"
             target="_blank"
             rel="noopener"
             class="hidden sm:inline-flex items-center justify-center size-9 hairline rounded-md text-muted-foreground hover:text-foreground transition-colors"
