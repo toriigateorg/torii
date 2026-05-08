@@ -17,6 +17,7 @@ type Config struct {
 	ToriiURL               string
 	AuditLogDir            string
 	BlockLoopbackUpstreams bool
+	TrustedProxyCIDRs      []string
 }
 
 func Load() (*Config, error) {
@@ -60,6 +61,21 @@ func Load() (*Config, error) {
 		blockLoopback = v == "1" || strings.EqualFold(v, "true")
 	}
 
+	// Comma-separated CIDR list of reverse proxies whose X-Forwarded-For
+	// values may be trusted. Without this, Echo's RealIP extractor honors
+	// XFF from any caller — meaning a public client can spoof their IP in
+	// audit logs and rate-limit keys. Default trusts loopback (the common
+	// "torii behind nginx on the same host" setup).
+	trustedCIDRs := []string{"127.0.0.1/32", "::1/128"}
+	if v := os.Getenv("TRUSTED_PROXY_CIDRS"); v != "" {
+		trustedCIDRs = nil
+		for _, p := range strings.Split(v, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				trustedCIDRs = append(trustedCIDRs, p)
+			}
+		}
+	}
+
 	return &Config{
 		AppEnv:                 env,
 		JWTSecret:              []byte(secret),
@@ -68,6 +84,7 @@ func Load() (*Config, error) {
 		ToriiURL:               toriiURL,
 		AuditLogDir:            auditDir,
 		BlockLoopbackUpstreams: blockLoopback,
+		TrustedProxyCIDRs:      trustedCIDRs,
 	}, nil
 }
 

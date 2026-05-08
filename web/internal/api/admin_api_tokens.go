@@ -223,11 +223,7 @@ func (h *authHandlers) resolveAPIToken(ctx context.Context, raw string) (*auth.C
 		roleStrs[i] = r.String()
 	}
 
-	go func(id uuid.UUID) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = h.q.TouchAPITokenLastUsed(ctx, id)
-	}(row.ID)
+	scheduleTouchAPIToken(h.q, row.ID)
 
 	claims := &auth.Claims{
 		Username:    user.Username,

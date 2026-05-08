@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"net/http"
@@ -254,7 +255,14 @@ func (h *authHandlers) oauthCallback(c *echo.Context) error {
 
 	stateCookie, err := c.Cookie(ssoStateCookie)
 	h.clearSSOTempCookie(c, ssoStateCookie)
-	if err != nil || stateCookie.Value == "" || stateCookie.Value != c.QueryParam("state") {
+	if err != nil || stateCookie.Value == "" {
+		return c.Redirect(http.StatusFound, "/signin?error=sso_state")
+	}
+	// Constant-time comparison: defensive even though both sides are
+	// server-issued, since the query value comes back through the IdP and
+	// the user's browser. Avoids any timing channel that future logging
+	// or framework changes might accidentally expose.
+	if subtle.ConstantTimeCompare([]byte(stateCookie.Value), []byte(c.QueryParam("state"))) != 1 {
 		return c.Redirect(http.StatusFound, "/signin?error=sso_state")
 	}
 	nonceCookie, err := c.Cookie(ssoNonceCookie)

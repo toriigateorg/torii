@@ -3,7 +3,9 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/url"
+	"os"
 	"sync"
 	"time"
 
@@ -81,6 +83,14 @@ func (c *ServiceCache) Invalidate() {
 func (c *ServiceCache) refreshLocked(ctx context.Context) {
 	rows, err := c.q.ListAllServicesWithRolesForCache(ctx)
 	if err != nil {
+		// Don't update loadedAt on failure: existing cache continues to
+		// serve stale-but-functional data; next Lookup will retry. Log so
+		// the operator notices DB issues instead of debugging "why aren't
+		// my service config changes showing up" silently.
+		fmt.Fprintln(os.Stderr, "[proxy] service cache refresh failed:", err)
+		// Bump loadedAt to "stale ttl ago" so we don't re-hammer a broken
+		// DB on every request — back off for one TTL.
+		c.loadedAt = time.Now().Add(-c.ttl + 5*time.Second)
 		return
 	}
 	next := make(map[string]*CachedService, len(rows))

@@ -248,6 +248,9 @@ func (h *authHandlers) adminUpdateSSO(c *echo.Context) error {
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not update provider"})
 	}
+	// Evict any cached *oidc.Provider for this id; issuer_url or other
+	// discovery-impacting fields may have changed.
+	oidcProviderCache.Delete(p.ID)
 	pid := p.ID
 	h.auditor.LogFromEcho(c, audit.Event{
 		EventType:  audit.EventSSOProviderUpdated,
@@ -269,6 +272,7 @@ func (h *authHandlers) adminDeleteSSO(c *echo.Context) error {
 	if err := h.q.DeleteSSOProvider(ctx, id); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not delete provider"})
 	}
+	oidcProviderCache.Delete(id)
 	pid := id
 	h.auditor.LogFromEcho(c, audit.Event{
 		EventType:  audit.EventSSOProviderDeleted,

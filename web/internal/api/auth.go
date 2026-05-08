@@ -351,7 +351,7 @@ func (h *authHandlers) logout(c *echo.Context) error {
 	// Tell the browser to flush its HTTP cache for this origin so the next
 	// navigation can't serve a stale upstream HTML payload that still has
 	// the user "signed in" visually.
-	c.Response().Header().Set("Clear-Site-Data", `"cache", "storage"`)
+	c.Response().Header().Set("Clear-Site-Data", `"cache", "storage", "executionContexts"`)
 	c.Response().Header().Set("Cache-Control", "no-store")
 	return c.NoContent(http.StatusNoContent)
 }
