@@ -14,6 +14,7 @@ import (
 
 	"torii/internal/audit"
 	"torii/internal/db"
+	"torii/internal/netutil"
 )
 
 var ssoSlugRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
@@ -67,7 +68,7 @@ func toSSOProviderDTO(p db.SsoProvider) ssoProviderDTO {
 	}
 }
 
-func validateSSOReq(req *adminSSOReq) string {
+func (h *authHandlers) validateSSOReq(req *adminSSOReq) string {
 	req.Slug = strings.ToLower(strings.TrimSpace(req.Slug))
 	req.Name = strings.TrimSpace(req.Name)
 	req.IssuerURL = strings.TrimSpace(req.IssuerURL)
@@ -89,6 +90,9 @@ func validateSSOReq(req *adminSSOReq) string {
 	}
 	if u.RawQuery != "" || u.Fragment != "" {
 		return "issuer_url must not contain a query or fragment"
+	}
+	if err := netutil.IsSafeUpstreamHost(u.Host, h.cfg.BlockLoopbackUpstreams); err != nil {
+		return "issuer_url rejected: " + err.Error()
 	}
 	req.IssuerURL = strings.TrimRight(req.IssuerURL, "/")
 	if req.ClientID == "" {
@@ -137,7 +141,7 @@ func (h *authHandlers) adminCreateSSO(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	if msg := validateSSOReq(&req); msg != "" {
+	if msg := h.validateSSOReq(&req); msg != "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
 	}
 	if req.ClientSecret == nil || strings.TrimSpace(*req.ClientSecret) == "" {
@@ -194,7 +198,7 @@ func (h *authHandlers) adminUpdateSSO(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	if msg := validateSSOReq(&req); msg != "" {
+	if msg := h.validateSSOReq(&req); msg != "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
 	}
 

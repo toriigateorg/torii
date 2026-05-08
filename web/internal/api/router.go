@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v5"
+	"golang.org/x/time/rate"
 
 	"torii/internal/audit"
 	"torii/internal/auth"
@@ -92,10 +93,20 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	h := &authHandlers{pool: pool, q: db.New(pool), cfg: cfg, cache: cache, auditor: auditor}
 	auth.SetAPITokenResolver(h.resolveAPIToken)
 
-	v1.POST("/signup", h.signup)
-	v1.POST("/signin", h.signin)
-	v1.POST("/token_refresh", h.tokenRefresh)
-	v1.GET("/refresh_and_redirect", h.refreshAndRedirect)
+	// authLimiter: 10 req/min/IP, burst 5. Tight because each signin/signup
+	// triggers argon2id (64 MiB, t=2) — without a limit a single attacker
+	// can both DoS and brute-force.
+	authLimiter := rateLimit(rate.Every(6*time.Second), 5)
+	// refreshLimiter: looser. token_refresh and refresh_and_redirect don't
+	// run argon2 and rotate an already-secret 32-byte refresh token, so
+	// they don't need credential-stuffing-grade limits — only a DoS cap.
+	// The SPA legitimately bursts these on page reloads (bootstrap → /me →
+	// 401 → /token_refresh) and across multiple tabs.
+	refreshLimiter := rateLimit(rate.Every(time.Second), 30)
+	v1.POST("/signup", h.signup, authLimiter)
+	v1.POST("/signin", h.signin, authLimiter)
+	v1.POST("/token_refresh", h.tokenRefresh, refreshLimiter)
+	v1.GET("/refresh_and_redirect", h.refreshAndRedirect, refreshLimiter)
 	v1.POST("/logout", h.logout)
 	v1.GET("/me", h.me, auth.RequireUser(cfg.JWTSecret))
 	v1.GET("/me/services", h.myServices, auth.RequireUser(cfg.JWTSecret))
@@ -164,8 +175,8 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 
 	v1.GET("/auth/config", h.publicAuthConfig)
 	v1.GET("/auth/providers", h.publicListProviders)
-	v1.GET("/oauth/:slug/start", h.oauthStart)
-	v1.GET("/oauth/:slug/callback", h.oauthCallback)
+	v1.GET("/oauth/:slug/start", h.oauthStart, authLimiter)
+	v1.GET("/oauth/:slug/callback", h.oauthCallback, authLimiter)
 
 	return h
 }

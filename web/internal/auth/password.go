@@ -59,6 +59,24 @@ func VerifyPassword(encoded, pw string) bool {
 	return subtle.ConstantTimeCompare(actual, expected) == 1
 }
 
+// dummyHash is a fixed argon2id-encoded hash used by signin to flatten the
+// timing side-channel that would otherwise let an attacker enumerate valid
+// usernames. When the supplied identifier doesn't match a user, the handler
+// runs VerifyPassword against this constant so the response time is
+// indistinguishable from a real-user-with-wrong-password path.
+//
+// The plaintext that hashes to this value is unknown — it was generated from
+// 32 random bytes that were immediately discarded.
+var dummyHash = "$argon2id$v=19$m=65536,t=2,p=1$YWFhYWFhYWFhYWFhYWFhYQ$EkCloWYf6QC03Cy0bWh0kdZW8j5HuPMvU2RFf0DAHyA"
+
+// VerifyDummyPassword runs argon2id verification against a fixed dummy hash.
+// Used by the signin handler when the user lookup fails, so the per-request
+// latency is the same as a real verify-against-stored-hash and an attacker
+// can't distinguish "no such user" from "wrong password".
+func VerifyDummyPassword(pw string) {
+	_ = VerifyPassword(dummyHash, pw)
+}
+
 var ErrWeakPassword = errors.New("password must be at least 8 characters and include upper, lower, digit, and special characters")
 
 func ValidatePasswordStrength(pw string) error {

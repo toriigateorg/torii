@@ -16,9 +16,40 @@ import (
 
 	"torii/internal/audit"
 	"torii/internal/db"
+	"torii/internal/netutil"
 )
 
-var domainRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[0-9]+)?$`)
+var (
+	domainRe     = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[0-9]+)?$`)
+	headerNameRe = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
+)
+
+// validateHeaderOverlay rejects per-service overlay entries that would
+// corrupt request parsing or undermine torii's identity contract:
+//   - header names with characters outside [A-Za-z0-9-] (parser quirks).
+//   - X-Torii-* names: torii itself injects these (signed identity headers)
+//     and the overlay is applied last, so allowing them here would let an
+//     admin forge the user identity sent to upstreams that verify the HMAC.
+//   - values containing CR/LF: classic HTTP request smuggling vector.
+//
+// Authorization, Cookie, Host, X-Forwarded-* and similar are intentionally
+// NOT blocked — they're load-bearing for legitimate identity-aware-proxy
+// configurations (e.g., setting a service-account Bearer for upstream apps
+// that have their own auth, or pinning Host for SNI/virtual hosting).
+func validateHeaderOverlay(headers map[string]string) string {
+	for k, v := range headers {
+		if !headerNameRe.MatchString(k) {
+			return "header name must match [A-Za-z0-9-]+: " + k
+		}
+		if strings.HasPrefix(strings.ToLower(k), "x-torii-") {
+			return "header name X-Torii-* is reserved for torii-signed identity assertions: " + k
+		}
+		if strings.ContainsAny(v, "\r\n") {
+			return "header value must not contain CR or LF: " + k
+		}
+	}
+	return ""
+}
 
 type serviceDTO struct {
 	ID          string            `json:"id"`
@@ -61,7 +92,7 @@ func toServiceDTO(s db.Service) serviceDTO {
 	}
 }
 
-func validateServiceReq(req *adminServiceReq) (headersJSON []byte, errMsg string) {
+func (h *authHandlers) validateServiceReq(req *adminServiceReq) (headersJSON []byte, errMsg string) {
 	req.Title = strings.TrimSpace(req.Title)
 	req.Description = strings.TrimSpace(req.Description)
 	req.ServiceURL = strings.TrimSpace(req.ServiceURL)
@@ -86,8 +117,14 @@ func validateServiceReq(req *adminServiceReq) (headersJSON []byte, errMsg string
 	if !(u.Path == "" || u.Path == "/") || u.RawQuery != "" || u.Fragment != "" {
 		return nil, "service_url must not contain a path, query, or fragment"
 	}
+	if err := netutil.IsSafeUpstreamHost(u.Host, h.cfg.BlockLoopbackUpstreams); err != nil {
+		return nil, "service_url rejected: " + err.Error()
+	}
 	if req.Headers == nil {
 		req.Headers = map[string]string{}
+	}
+	if msg := validateHeaderOverlay(req.Headers); msg != "" {
+		return nil, msg
 	}
 	headersJSON, err = json.Marshal(req.Headers)
 	if err != nil {
@@ -124,7 +161,7 @@ func (h *authHandlers) adminCreateService(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	headers, msg := validateServiceReq(&req)
+	headers, msg := h.validateServiceReq(&req)
 	if msg != "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
 	}
@@ -166,7 +203,7 @@ func (h *authHandlers) adminUpdateService(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	headers, msg := validateServiceReq(&req)
+	headers, msg := h.validateServiceReq(&req)
 	if msg != "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
 	}

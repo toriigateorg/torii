@@ -157,6 +157,8 @@ func runInner(ctx context.Context, host string, port int) error {
 
 	e := echo.New()
 	e.Use(middleware.RequestLogger())
+	e.Use(middleware.BodyLimit(1 << 20))
+	e.Use(securityHeaders(cfg))
 
 	var cache *proxy.ServiceCache
 	if pool != nil {
@@ -190,8 +192,13 @@ func runInner(ctx context.Context, host string, port int) error {
 	e.Any("/*", dispatch(cfg, cache, auditor, refresher, spaHandler))
 
 	srv := &http.Server{
-		Addr:    fmt.Sprintf("%s:%d", host, port),
-		Handler: e,
+		Addr:              fmt.Sprintf("%s:%d", host, port),
+		Handler:           e,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	serverErr := make(chan error, 1)

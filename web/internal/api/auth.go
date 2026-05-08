@@ -232,6 +232,11 @@ func (h *authHandlers) signin(c *echo.Context) error {
 	user, err := h.q.GetUserByUsernameOrEmail(c.Request().Context(), req.Identifier)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			// Run argon2 against a constant dummy hash so the unknown-user
+			// path takes the same wall-clock time as a real
+			// known-user-wrong-password path. Without this, response timing
+			// reveals which identifiers exist.
+			auth.VerifyDummyPassword(req.Password)
 			signinFail("unknown_user", nil, "")
 			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		}
