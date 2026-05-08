@@ -6,8 +6,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
-	"sanmon/internal/audit"
-	"sanmon/internal/db"
+	"torii/internal/audit"
+	"torii/internal/db"
 )
 
 type adminUserRoleAssignReq struct {

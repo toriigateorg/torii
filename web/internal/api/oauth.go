@@ -19,8 +19,8 @@ import (
 	"github.com/labstack/echo/v5"
 	"golang.org/x/oauth2"
 
-	"sanmon/internal/audit"
-	"sanmon/internal/db"
+	"torii/internal/audit"
+	"torii/internal/db"
 )
 
 const (

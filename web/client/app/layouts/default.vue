@@ -25,16 +25,16 @@ async function onSignout() {
       :class="isLanding ? 'border-b border-border/30 bg-background/30' : 'border-b border-border/60 bg-background/70'"
     >
       <div class="mx-auto max-w-7xl flex h-14 items-center justify-between px-4 sm:px-6 lg:px-8">
-        <NuxtLink to="/" class="flex items-center gap-2 group" aria-label="sanmon — home">
+        <NuxtLink to="/" class="flex items-center gap-2 group" aria-label="torii — home">
           <img
-            src="/sanmon-logo.svg"
+            src="/torii-logo.svg"
             alt=""
             aria-hidden="true"
             width="28"
             height="28"
             class="size-7 rounded-md"
           />
-          <span class="font-semibold tracking-tight">sanmon</span>
+          <span class="font-semibold tracking-tight">torii</span>
           <span class="text-mono-label hidden sm:inline ml-2">v0.1</span>
         </NuxtLink>
 
@@ -149,7 +149,7 @@ async function onSignout() {
     <footer class="border-t border-border/60 mt-24">
       <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <span class="font-mono text-xs text-muted-foreground">
-          &copy; 2026 sanmon
+          &copy; 2026 torii
         </span>
         <span class="font-mono text-xs text-muted-foreground">
           crafted by

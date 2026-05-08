@@ -8,11 +8,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v5"
 
-	"sanmon/internal/audit"
-	"sanmon/internal/auth"
-	"sanmon/internal/config"
-	"sanmon/internal/db"
-	"sanmon/internal/proxy"
+	"torii/internal/audit"
+	"torii/internal/auth"
+	"torii/internal/config"
+	"torii/internal/db"
+	"torii/internal/proxy"
 )
 
 // SessionRefresher rotates the caller's session using the refresh cookie,

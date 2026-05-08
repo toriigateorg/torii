@@ -5,7 +5,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"sanmon/internal/auth"
+	"torii/internal/auth"
 )
 
 func (h *authHandlers) adminListPermissions(c *echo.Context) error {

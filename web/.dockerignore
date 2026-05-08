@@ -13,7 +13,7 @@ client/.nuxt
 client/.output
 
 # Go binary outputs
-sanmon
+torii
 *.test
 *.out
 

@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/urfave/cli/v3"
 
-	"sanmon/internal/db"
+	"torii/internal/db"
 )
 
 func Audit() *cli.Command {

@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v5"
 
-	"sanmon/internal/db"
+	"torii/internal/db"
 )
 
 type auditLogDTO struct {

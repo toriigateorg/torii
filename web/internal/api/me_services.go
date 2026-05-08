@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
-	"sanmon/internal/auth"
+	"torii/internal/auth"
 )
 
 func (h *authHandlers) myServices(c *echo.Context) error {

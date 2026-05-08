@@ -3,7 +3,7 @@ import { Plus, Trash2, Pencil } from "lucide-vue-next"
 import type { SSOProvider, SSOProviderPayload } from "~/composables/useAdminApi"
 
 definePageMeta({ middleware: ["auth", "admin"] })
-useHead({ title: "Admin · SSO — sanmon" })
+useHead({ title: "Admin · SSO — torii" })
 
 const api = useAdminApi()
 
@@ -272,7 +272,7 @@ async function confirmDelete() {
             Any OIDC-compliant identity provider works (Google, Zitadel, Keycloak, Auth0, …).
             The redirect URI is <span class="font-mono">https://&lt;host&gt;/api/v1/oauth/&lt;slug&gt;/callback</span>,
             where <span class="font-mono">&lt;host&gt;</span> is whichever domain the user signs in from.
-            Register a callback for every domain that fronts sanmon (the main UI plus each proxied service host).
+            Register a callback for every domain that fronts torii (the main UI plus each proxied service host).
           </DialogDescription>
         </DialogHeader>
         <form class="flex flex-col gap-4" @submit.prevent="submit">
@@ -341,14 +341,14 @@ async function confirmDelete() {
               <Checkbox :model-value="form.link_by_email" @update:model-value="(v) => (form.link_by_email = !!v)" />
               <div class="flex-1 text-sm">
                 <div class="font-medium">Link by verified email</div>
-                <div class="text-xs text-muted-foreground">If a sanmon user already exists with the same email and the IdP confirms <code>email_verified</code>, attach this identity to that user.</div>
+                <div class="text-xs text-muted-foreground">If a torii user already exists with the same email and the IdP confirms <code>email_verified</code>, attach this identity to that user.</div>
               </div>
             </label>
             <label class="flex items-start gap-3 p-2 rounded hairline cursor-pointer">
               <Checkbox :model-value="form.allow_signup" @update:model-value="(v) => (form.allow_signup = !!v)" />
               <div class="flex-1 text-sm">
                 <div class="font-medium">Auto-provision new users</div>
-                <div class="text-xs text-muted-foreground">If no match is found, create a new sanmon user from the OIDC profile.</div>
+                <div class="text-xs text-muted-foreground">If no match is found, create a new torii user from the OIDC profile.</div>
               </div>
             </label>
           </div>

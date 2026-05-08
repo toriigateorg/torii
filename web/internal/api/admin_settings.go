@@ -6,8 +6,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"sanmon/internal/audit"
-	"sanmon/internal/db"
+	"torii/internal/audit"
+	"torii/internal/db"
 )
 
 const settingSignupEnabled = "signup_enabled"

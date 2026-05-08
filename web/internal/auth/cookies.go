@@ -15,7 +15,7 @@ const (
 	// uses its presence to decide whether an unauthenticated request on a
 	// service domain is worth a refresh-and-redirect attempt or whether the
 	// user is genuinely logged out and should fall through to the SPA.
-	SessionCookie = "sanmon_session"
+	SessionCookie = "torii_session"
 
 	refreshCookiePath = "/api/v1/"
 )

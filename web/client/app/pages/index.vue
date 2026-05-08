@@ -13,7 +13,7 @@ import {
 } from "lucide-vue-next"
 
 useHead({
-  title: "sanmon — identity-aware reverse proxy",
+  title: "torii — identity-aware reverse proxy",
   meta: [
     { name: "description", content: "A reverse HTTP proxy with built-in authentication and role-based access control. Front your services with policy, not plumbing." },
   ],
@@ -24,7 +24,7 @@ const features = [
     no: "01",
     label: "IDENTITY",
     title: "Single sign-on, everywhere",
-    body: "Bring OIDC, SAML, or your own provider. sanmon terminates auth at the edge so your services never see a raw request.",
+    body: "Bring OIDC, SAML, or your own provider. torii terminates auth at the edge so your services never see a raw request.",
     icon: Fingerprint,
   },
   {
@@ -115,7 +115,7 @@ onBeforeUnmount(() => {
             </h1>
 
             <p class="mt-7 text-base sm:text-lg text-muted-foreground max-w-xl leading-relaxed">
-              sanmon terminates authentication, enforces RBAC, and routes traffic
+              torii terminates authentication, enforces RBAC, and routes traffic
               upstream &mdash; so your services can stop reimplementing the same
               middleware in five different languages.
             </p>
@@ -127,7 +127,7 @@ onBeforeUnmount(() => {
               </Button>
               <Button variant="outline" size="lg" class="h-11 px-5 font-mono text-xs hairline">
                 <Terminal class="size-3.5 mr-2" aria-hidden="true" />
-                docker run sanmon/sanmon
+                docker run torii/torii
               </Button>
             </div>
 
@@ -156,7 +156,7 @@ onBeforeUnmount(() => {
                     <span class="size-2.5 rounded-full bg-foreground/15" />
                   </div>
                   <span class="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
-                    sanmon.yaml
+                    torii.yaml
                   </span>
                 </div>
                 <pre class="font-mono text-[12.5px] leading-relaxed p-5 overflow-x-auto"><span class="text-muted-foreground"># route api.acme.com to internal service</span>
@@ -279,7 +279,7 @@ onBeforeUnmount(() => {
               preserveAspectRatio="xMidYMid meet"
             >
               <title id="flow-svg-title">Request lifecycle</title>
-              <desc id="flow-svg-desc">A client sends a request that travels through sanmon's three gates — authn, authz, and route — before being proxied to one of three upstreams.</desc>
+              <desc id="flow-svg-desc">A client sends a request that travels through torii's three gates — authn, authz, and route — before being proxied to one of three upstreams.</desc>
 
               <defs>
                 <linearGradient id="wireGrad" x1="0" x2="1" y1="0" y2="0">
@@ -348,7 +348,7 @@ onBeforeUnmount(() => {
               <!-- Annotation under client -->
               <text x="82" y="246" text-anchor="middle" font-family="var(--font-mono)" font-size="8" fill="currentColor" fill-opacity="0.4" letter-spacing="2">cookie · bearer</text>
 
-              <!-- ============ SANMON SPINE ============ -->
+              <!-- ============ TORII SPINE ============ -->
               <g>
                 <!-- Spine container -->
                 <rect x="380" y="40" width="235" height="300" rx="10" fill="url(#spineGrad)" stroke="currentColor" stroke-opacity="0.35" />
@@ -356,7 +356,7 @@ onBeforeUnmount(() => {
                 <rect x="386" y="46" width="223" height="288" rx="7" fill="none" stroke="currentColor" stroke-opacity="0.12" stroke-dasharray="1 3" />
 
                 <!-- Spine header -->
-                <text x="395" y="62" font-family="var(--font-mono)" font-size="8.5" fill="currentColor" fill-opacity="0.5" letter-spacing="2">SANMON / EDGE</text>
+                <text x="395" y="62" font-family="var(--font-mono)" font-size="8.5" fill="currentColor" fill-opacity="0.5" letter-spacing="2">TORII / EDGE</text>
                 <circle cx="601" cy="58" r="2.5" fill="oklch(0.7 0.2 150)">
                   <animate attributeName="opacity" values="0.4;1;0.4" dur="1.6s" repeatCount="indefinite" />
                 </circle>
@@ -611,13 +611,13 @@ onBeforeUnmount(() => {
           <div aria-hidden="true" class="absolute -bottom-20 -right-20 size-96 glow-blob opacity-60 pointer-events-none" />
 
           <div class="relative max-w-2xl">
-            <p class="text-mono-label mb-5">// $ ./sanmon serve</p>
+            <p class="text-mono-label mb-5">// $ ./torii serve</p>
             <h2 id="cta-title" class="text-3xl sm:text-4xl lg:text-5xl font-semibold tracking-tight leading-tight">
               Stop shipping auth code.<br />
               Start shipping product.
             </h2>
             <p class="mt-5 text-muted-foreground leading-relaxed">
-              One binary, one config file, one decision per request. sanmon
+              One binary, one config file, one decision per request. torii
               fronts your services so the rest of your stack can be stateless,
               public, and boring.
             </p>

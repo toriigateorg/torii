@@ -12,7 +12,7 @@ type Config struct {
 	JWTSecret       []byte
 	AccessTokenTTL  time.Duration
 	RefreshTokenTTL time.Duration
-	SanmonURL       string
+	ToriiURL       string
 	AuditLogDir     string
 }
 
@@ -27,9 +27,9 @@ func Load() (*Config, error) {
 		env = "dev"
 	}
 
-	sanmonURL := os.Getenv("SANMON_URL")
-	if sanmonURL == "" {
-		return nil, errors.New("SANMON_URL is required")
+	toriiURL := os.Getenv("TORII_URL")
+	if toriiURL == "" {
+		return nil, errors.New("TORII_URL is required")
 	}
 
 	auditDir := os.Getenv("AUDIT_LOG_DIR")
@@ -42,7 +42,7 @@ func Load() (*Config, error) {
 		JWTSecret:       []byte(secret),
 		AccessTokenTTL:  time.Duration(intEnv("ACCESS_TOKEN_EXPIRY_MINS", 5)) * time.Minute,
 		RefreshTokenTTL: time.Duration(intEnv("REFRESH_TOKEN_EXPIRY_DAYS", 7)) * 24 * time.Hour,
-		SanmonURL:       sanmonURL,
+		ToriiURL:       toriiURL,
 		AuditLogDir:     auditDir,
 	}, nil
 }

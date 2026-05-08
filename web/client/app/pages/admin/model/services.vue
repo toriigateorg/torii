@@ -3,7 +3,7 @@ import { Plus, Trash2, Pencil, X } from "lucide-vue-next"
 import type { Service, ServicePayload } from "~/composables/useAdminApi"
 
 definePageMeta({ middleware: ["auth", "admin"] })
-useHead({ title: "Admin · Services — sanmon" })
+useHead({ title: "Admin · Services — torii" })
 
 const api = useAdminApi()
 
@@ -246,7 +246,7 @@ async function confirmDelete() {
         <DialogHeader>
           <DialogTitle>{{ formMode === "create" ? "Create service" : "Edit service" }}</DialogTitle>
           <DialogDescription>
-            Map an incoming domain to an upstream URL. Sanmon proxies the request once the user is signed in.
+            Map an incoming domain to an upstream URL. Torii proxies the request once the user is signed in.
           </DialogDescription>
         </DialogHeader>
         <form class="flex flex-col gap-4" @submit.prevent="submit">

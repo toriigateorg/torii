@@ -1,4 +1,4 @@
-module sanmon
+module torii
 
 go 1.26.2
 

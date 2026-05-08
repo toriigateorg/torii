@@ -1,10 +1,10 @@
-# sanmon
+# torii
 
 Identity-aware reverse proxy with built-in auth and RBAC. Single Go binary in production: the Echo API server, golang-migrate, and the embedded Nuxt SPA all ship as one executable.
 
 ## House rules (read first, every session)
 
-1. **Never run `go`, `bun`, `sqlc`, `docker`, or `docker compose` commands yourself.** Print the exact command and ask the user to run it. This includes `go get`, `go mod tidy`, `bun add`, `bun install`, `sqlc generate`, `docker compose up`, builds, etc. Same goes for migrations (`sanmon migrate ...`).
+1. **Never run `go`, `bun`, `sqlc`, `docker`, or `docker compose` commands yourself.** Print the exact command and ask the user to run it. This includes `go get`, `go mod tidy`, `bun add`, `bun install`, `sqlc generate`, `docker compose up`, builds, etc. Same goes for migrations (`torii migrate ...`).
 2. **No SSR.** Nuxt is configured with `ssr: false` and is treated as a static SPA. Every piece of dynamic data on every page is hydrated client-side by calling the Go API. Don't reach for `useFetch` server-side patterns, `serverMiddleware`, Nitro routes, or any Nuxt feature that runs on a Node server.
 3. **API routes live under `/api/v1/`.** No exceptions.
 4. **Admin routes are namespaced.** Backend: `/api/v1/admin/...`. Frontend: `/admin/...`. Both gates are enforced (server: `auth.RequireAdmin`; client: `middleware/admin.ts` throwing a 401 `createError`).
@@ -24,8 +24,8 @@ Identity-aware reverse proxy with built-in auth and RBAC. Single Go binary in pr
 ```
 server.go                    package main; godotenv + cli root
 cmd/
-  serve.go                   `sanmon serve` (with --migrate flag)
-  migrate.go                 `sanmon migrate up|down`
+  serve.go                   `torii serve` (with --migrate flag)
+  migrate.go                 `torii migrate up|down`
 internal/
   api/
     router.go                mounts /api/v1 group, auth + admin routes
@@ -88,11 +88,11 @@ docker-compose.prod.yml      prod (named volume, healthcheck, APP_ENV=production
 
 ## Reverse proxy
 
-- **Top-level dispatch** (`cmd/serve.go:dispatch`): every non-`/api/v1/*` request is routed by `Host`. `Host == SANMON_URL` -> SPA. Match in the `services` table + valid sanmon access token -> `httputil.ReverseProxy` to `service_url` (path/query forwarded as-is, `Host` rewritten to upstream, per-service `headers` overlaid on top of the client's headers). Unmatched / unauthenticated -> SPA (which renders signin or a 4xx via `error.vue` once authed).
+- **Top-level dispatch** (`cmd/serve.go:dispatch`): every non-`/api/v1/*` request is routed by `Host`. `Host == TORII_URL` -> SPA. Match in the `services` table + valid torii access token -> `httputil.ReverseProxy` to `service_url` (path/query forwarded as-is, `Host` rewritten to upstream, per-service `headers` overlaid on top of the client's headers). Unmatched / unauthenticated -> SPA (which renders signin or a 4xx via `error.vue` once authed).
 - **Service cache** (`internal/proxy/cache.go`): in-memory `map[domain]*CachedService`, refreshed on TTL (30 s) or explicit `Invalidate()` from the admin services CRUD handlers.
 - **Service config**: `domain` is hostname[:port] (no scheme/path); `service_url` is `http(s)://host[:port]` with no path/query/fragment. Both are validated server- and client-side.
-- **Auth on proxied requests**: any signed-in sanmon user. RBAC per service is intentionally not implemented yet.
-- **Cross-domain login**: cookies are scoped per host, so a user must sign in once per service domain. The signin page detects non-SANMON_URL hosts and does a hard `window.location.assign("/")` after success so the Go dispatch can re-evaluate and proxy.
+- **Auth on proxied requests**: any signed-in torii user. RBAC per service is intentionally not implemented yet.
+- **Cross-domain login**: cookies are scoped per host, so a user must sign in once per service domain. The signin page detects non-TORII_URL hosts and does a hard `window.location.assign("/")` after success so the Go dispatch can re-evaluate and proxy.
 - **WebSockets / streaming**: handled natively by `httputil.ReverseProxy` (Connection/Upgrade headers preserved by the default director).
 
 ## Configuration (env)
@@ -106,7 +106,7 @@ docker-compose.prod.yml      prod (named volume, healthcheck, APP_ENV=production
 | `DATABASE_URL` | *(required)* | pgx connection string |
 | `API_HOST` | `0.0.0.0` | |
 | `API_PORT` | `1356` | |
-| `SANMON_URL` | *(required)* | host[:port] sanmon itself answers on. Requests with this `Host` header serve the SPA; other hosts go through the reverse-proxy. Dev value: `localhost:1356`. Also exposed to the SPA via `runtimeConfig.public.sanmonUrl`. |
+| `TORII_URL` | *(required)* | host[:port] torii itself answers on. Requests with this `Host` header serve the SPA; other hosts go through the reverse-proxy. Dev value: `localhost:1356`. Also exposed to the SPA via `runtimeConfig.public.toriiUrl`. |
 | `AUDIT_LOG_DIR` | `./logs` | directory for the JSON-lines audit trail (`audit.jsonl`); auto-created. Mount a volume here in prod (compose mounts `audit-logs` → `/app/logs`). |
 
 Loaded by `godotenv.Load()` in `server.go` from `.env`/`.app.env`.
@@ -133,12 +133,12 @@ Note: sqlc overwrites `internal/db/db.go`, `models.go`, and `*.sql.go`. The hand
 Add a migration:
 ```
 # create files manually as migrations/NNNN_name.{up,down}.sql
-sanmon migrate up        # via docker: docker compose run --rm app sanmon migrate up
+torii migrate up        # via docker: docker compose run --rm app torii migrate up
 ```
 
 Prune audit logs:
 ```
-sanmon audit prune --days 90
+torii audit prune --days 90
 ```
 
 Add a shadcn-vue component (in `client/`):
@@ -155,8 +155,8 @@ or locally:
 cd client && bun run generate && cd ..
 rm -rf internal/web/dist && mkdir -p internal/web/dist
 cp -r client/.output/public/. internal/web/dist/
-go build -o sanmon .
-APP_ENV=production JWT_SECRET=... DATABASE_URL=... ./sanmon serve --migrate
+go build -o torii .
+APP_ENV=production JWT_SECRET=... DATABASE_URL=... ./torii serve --migrate
 ```
 
 ## Conventions & gotchas

@@ -3,7 +3,7 @@ import { UserPlus } from "lucide-vue-next"
 
 definePageMeta({ middleware: "guest" })
 
-useHead({ title: "Sign up — sanmon" })
+useHead({ title: "Sign up — torii" })
 
 const { signup } = useAuth()
 
@@ -86,7 +86,7 @@ async function onSubmit() {
           <UserPlus class="size-4 text-primary" aria-hidden="true" />
           <span class="text-mono-label">// signup</span>
         </div>
-        <h1 class="sr-only">Create a sanmon account</h1>
+        <h1 class="sr-only">Create a torii account</h1>
         <CardTitle class="text-2xl tracking-tight">Create account</CardTitle>
         <CardDescription id="signup-pw-hint">
           {{ isProd

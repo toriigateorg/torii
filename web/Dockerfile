@@ -29,26 +29,26 @@ COPY --from=client /app/client/.output/public/ ./internal/web/dist/
 
 # Static, stripped binary.
 ENV CGO_ENABLED=0 GOOS=linux
-RUN go build -trimpath -ldflags='-s -w' -o /out/sanmon .
+RUN go build -trimpath -ldflags='-s -w' -o /out/torii .
 
 # ---------- Stage 3: minimal runtime ----------
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata \
-    && addgroup -S sanmon && adduser -S sanmon -G sanmon
+    && addgroup -S torii && adduser -S torii -G torii
 
 WORKDIR /app
 
 # Migrations are read from disk (file://migrations) by `migrate up`, so they
 # need to ship inside the runtime image even though the SPA is embedded.
-COPY --from=server /out/sanmon /usr/local/bin/sanmon
+COPY --from=server /out/torii /usr/local/bin/torii
 COPY migrations /app/migrations
 
-RUN mkdir -p /app/logs && chown sanmon:sanmon /app/logs
+RUN mkdir -p /app/logs && chown torii:torii /app/logs
 
-USER sanmon
+USER torii
 EXPOSE 1356
 
 ENV APP_ENV=production
 
-ENTRYPOINT ["sanmon"]
+ENTRYPOINT ["torii"]
 CMD ["serve", "--migrate"]

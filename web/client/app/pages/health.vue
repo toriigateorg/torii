@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { RefreshCw, CheckCircle2, XCircle, AlertTriangle } from "lucide-vue-next"
 
-useHead({ title: "sanmon — health" })
+useHead({ title: "torii — health" })
 
 type HealthResponse = { all: boolean; db: boolean; api: boolean }
 
@@ -55,7 +55,7 @@ function timeAgo(d: Date | null) {
     <p class="text-mono-label mb-4">// /api/v1/ht/</p>
     <h1 class="text-3xl sm:text-4xl font-semibold tracking-tight">System health</h1>
     <p class="mt-3 text-muted-foreground">
-      Live state of the sanmon control plane and its dependencies.
+      Live state of the torii control plane and its dependencies.
     </p>
 
     <!-- Overall status -->

@@ -12,9 +12,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/labstack/echo/v5"
 
-	"sanmon/internal/audit"
-	"sanmon/internal/auth"
-	"sanmon/internal/db"
+	"torii/internal/audit"
+	"torii/internal/auth"
+	"torii/internal/db"
 )
 
 type roleDTO struct {

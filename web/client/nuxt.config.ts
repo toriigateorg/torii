@@ -10,7 +10,7 @@ export default defineNuxtConfig({
 
   runtimeConfig: {
     public: {
-      sanmonUrl: process.env.SANMON_URL ?? "",
+      toriiUrl: process.env.TORII_URL ?? "",
     },
   },
 
@@ -21,9 +21,9 @@ export default defineNuxtConfig({
         { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" },
       ],
       link: [
-        { rel: "icon", type: "image/svg+xml", href: "/sanmon-logo.svg" },
+        { rel: "icon", type: "image/svg+xml", href: "/torii-logo.svg" },
         { rel: "alternate icon", type: "image/x-icon", href: "/favicon.ico" },
-        { rel: "apple-touch-icon", href: "/sanmon-logo.svg" },
+        { rel: "apple-touch-icon", href: "/torii-logo.svg" },
       ],
     },
   },
@@ -42,7 +42,7 @@ export default defineNuxtConfig({
     preference: "system",
     fallback: "light",
     classSuffix: "",
-    storageKey: "sanmon-theme",
+    storageKey: "torii-theme",
   },
 
   shadcn: {

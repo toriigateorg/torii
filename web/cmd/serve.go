@@ -22,19 +22,19 @@ import (
 	"github.com/labstack/echo/v5/middleware"
 	"github.com/urfave/cli/v3"
 
-	"sanmon/internal/api"
-	"sanmon/internal/audit"
-	"sanmon/internal/auth"
-	"sanmon/internal/config"
-	"sanmon/internal/db"
-	"sanmon/internal/proxy"
-	"sanmon/internal/web"
+	"torii/internal/api"
+	"torii/internal/audit"
+	"torii/internal/auth"
+	"torii/internal/config"
+	"torii/internal/db"
+	"torii/internal/proxy"
+	"torii/internal/web"
 )
 
 func Serve() *cli.Command {
 	return &cli.Command{
 		Name:  "serve",
-		Usage: "run the sanmon server (dev: via air with embedded Nuxt)",
+		Usage: "run the torii server (dev: via air with embedded Nuxt)",
 		Flags: []cli.Flag{
 			&cli.IntFlag{
 				Name:    "api-port",
@@ -309,10 +309,10 @@ func pipePrefixed(wg *sync.WaitGroup, r io.Reader, prefix string) {
 	}
 }
 
-// dispatch routes incoming non-API traffic by Host. Requests for the sanmon
+// dispatch routes incoming non-API traffic by Host. Requests for the torii
 // domain are served by the SPA handler; requests whose Host matches a
 // configured service.domain are reverse-proxied (when the caller carries a
-// valid sanmon access token); everything else falls through to the SPA so the
+// valid torii access token); everything else falls through to the SPA so the
 // signin page or 4xx page can render under the unknown domain.
 // hasSessionMarker reports whether the request carries the non-secret
 // session marker cookie. Used by dispatch to decide whether an unauthenticated
@@ -355,7 +355,7 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logg
 			return spa(c)
 		}
 		host := c.Request().Host
-		if host == cfg.SanmonURL {
+		if host == cfg.ToriiURL {
 			return spa(c)
 		}
 		if cache != nil {

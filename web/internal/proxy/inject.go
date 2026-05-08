@@ -8,14 +8,14 @@ import (
 	"strings"
 )
 
-// sanmonOverlay is a self-contained HTML snippet injected before </body> on
+// toriiOverlay is a self-contained HTML snippet injected before </body> on
 // every proxied HTML response. It mounts a draggable circular button in a
 // closed shadow root that opens a small dropdown with a sign-out action.
-const sanmonOverlay = `<div id="__sanmon_overlay" data-sanmon></div>
+const toriiOverlay = `<div id="__torii_overlay" data-torii></div>
 <script>(function(){
-  if (window.__sanmonOverlayMounted) return;
-  window.__sanmonOverlayMounted = true;
-  var mount = document.getElementById('__sanmon_overlay');
+  if (window.__toriiOverlayMounted) return;
+  window.__toriiOverlayMounted = true;
+  var mount = document.getElementById('__torii_overlay');
   if (!mount || !mount.attachShadow) return;
   var root = mount.attachShadow({mode:'closed'});
   root.innerHTML = [
@@ -38,7 +38,7 @@ const sanmonOverlay = `<div id="__sanmon_overlay" data-sanmon></div>
     '@keyframes fade{from{opacity:0;transform:translateY(2px);}to{opacity:1;transform:translateY(0);}}',
     '@media (prefers-color-scheme: light){.btn{background:rgba(255,255,255,.88);color:#111;border-color:rgba(0,0,0,.12);box-shadow:0 6px 24px -6px rgba(0,0,0,.18),0 2px 6px -1px rgba(0,0,0,.08);} .btn:hover{background:rgba(255,255,255,.96);border-color:rgba(0,0,0,.22);} .menu{background:rgba(255,255,255,.96);color:#111;border-color:rgba(0,0,0,.12);box-shadow:0 12px 40px -8px rgba(0,0,0,.18),0 4px 12px -2px rgba(0,0,0,.08);} .menu .label{color:rgba(0,0,0,.5);} .menu .item:hover,.menu .item:focus-visible{background:rgba(0,0,0,.06);} .menu .sep{background:rgba(0,0,0,.08);}}',
     '</style>',
-    '<button class="btn" type="button" aria-label="Open sanmon menu" aria-haspopup="menu" aria-expanded="false">',
+    '<button class="btn" type="button" aria-label="Open torii menu" aria-haspopup="menu" aria-expanded="false">',
       '<svg class="logo" viewBox="0 0 680 680" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">',
         '<defs><clipPath id="sm_clip"><circle cx="340" cy="340" r="300"/></clipPath></defs>',
         '<circle cx="340" cy="340" r="300" fill="#f5e9d3"/>',
@@ -74,8 +74,8 @@ const sanmonOverlay = `<div id="__sanmon_overlay" data-sanmon></div>
       '</svg>',
       '<span class="ind" aria-hidden="true"></span>',
     '</button>',
-    '<div class="menu" role="menu" aria-label="sanmon">',
-      '<div class="label">// sanmon</div>',
+    '<div class="menu" role="menu" aria-label="torii">',
+      '<div class="label">// torii</div>',
       '<button class="item" type="button" role="menuitem" data-action="signout">',
         '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>',
         '<span>Sign out</span>',
@@ -87,7 +87,7 @@ const sanmonOverlay = `<div id="__sanmon_overlay" data-sanmon></div>
   var menu = root.querySelector('.menu');
   var signoutItem = root.querySelector('[data-action="signout"]');
 
-  var STORAGE_KEY = 'sanmon:overlay:pos';
+  var STORAGE_KEY = 'torii:overlay:pos';
   var DRAG_THRESHOLD = 16; // squared px (4px movement)
   var pos = loadPos();
   applyPos();
@@ -162,7 +162,7 @@ const sanmonOverlay = `<div id="__sanmon_overlay" data-sanmon></div>
     fetch('/api/v1/logout', { method:'POST', credentials:'include', cache:'no-store' })
       .catch(function(){})
       .finally(function(){
-        window.location.replace('/?sanmon_logout=' + Date.now());
+        window.location.replace('/?torii_logout=' + Date.now());
       });
   });
 
@@ -198,10 +198,10 @@ const sanmonOverlay = `<div id="__sanmon_overlay" data-sanmon></div>
   }
 })();</script>`
 
-var sanmonOverlayBytes = []byte(sanmonOverlay)
+var toriiOverlayBytes = []byte(toriiOverlay)
 var bodyCloseTag = []byte("</body>")
 
-// injectOverlay rewrites an HTML response to splice the sanmon overlay in
+// injectOverlay rewrites an HTML response to splice the torii overlay in
 // just before </body>. No-op for non-HTML, encoded, or partial responses.
 func injectOverlay(resp *http.Response) error {
 	ct := resp.Header.Get("Content-Type")
@@ -220,9 +220,9 @@ func injectOverlay(resp *http.Response) error {
 	idx := bytes.LastIndex(body, bodyCloseTag)
 	var out []byte
 	if idx >= 0 {
-		out = make([]byte, 0, len(body)+len(sanmonOverlayBytes))
+		out = make([]byte, 0, len(body)+len(toriiOverlayBytes))
 		out = append(out, body[:idx]...)
-		out = append(out, sanmonOverlayBytes...)
+		out = append(out, toriiOverlayBytes...)
 		out = append(out, body[idx:]...)
 	} else {
 		out = body

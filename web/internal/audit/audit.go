@@ -13,8 +13,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v5"
 
-	"sanmon/internal/auth"
-	"sanmon/internal/db"
+	"torii/internal/auth"
+	"torii/internal/db"
 )
 
 const (

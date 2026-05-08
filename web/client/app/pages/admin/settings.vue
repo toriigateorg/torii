@@ -1,6 +1,6 @@
 <script setup lang="ts">
 definePageMeta({ middleware: ["auth", "admin"] })
-useHead({ title: "Admin · Settings — sanmon" })
+useHead({ title: "Admin · Settings — torii" })
 
 const api = useAdminApi()
 
@@ -63,7 +63,7 @@ async function toggleSignup(next: boolean) {
       <CardHeader>
         <CardTitle class="text-base">Account creation</CardTitle>
         <CardDescription>
-          Controls who can register a sanmon account through the public sign-up form. Disabling
+          Controls who can register a torii account through the public sign-up form. Disabling
           this does not affect SSO provisioning (each SSO provider has its own
           <span class="font-mono">allow_signup</span> toggle) and does not affect admin-created users.
         </CardDescription>

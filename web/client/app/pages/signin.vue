@@ -1,7 +1,7 @@
 <script setup lang="ts">
 definePageMeta({ middleware: "guest" })
 
-useHead({ title: "Sign in — sanmon" })
+useHead({ title: "Sign in — torii" })
 
 const { signin } = useAuth()
 const route = useRoute()
@@ -16,7 +16,7 @@ const providers = ref<PublicProvider[]>([])
 const signupEnabled = ref(true)
 
 const ssoErrorMessages: Record<string, string> = {
-  sso_no_account: "No matching sanmon account for that identity.",
+  sso_no_account: "No matching torii account for that identity.",
   sso_no_email: "Provider did not share an email address.",
   sso_state: "Sign-in session expired. Please try again.",
   sso_denied: "Sign-in was cancelled at the provider.",
@@ -52,7 +52,7 @@ async function onSubmit() {
   loading.value = true
   try {
     await signin(identifier.value.trim(), password.value)
-    const expected = useRuntimeConfig().public.sanmonUrl
+    const expected = useRuntimeConfig().public.toriiUrl
     if (expected && window.location.host !== expected) {
       window.location.assign("/")
       return
@@ -76,10 +76,10 @@ function ssoSignin(slug: string) {
     <Card class="hairline">
       <CardHeader>
         <div class="flex items-center gap-2 mb-1">
-          <img src="/sanmon-logo.svg" alt="" aria-hidden="true" width="20" height="20" class="size-5" />
+          <img src="/torii-logo.svg" alt="" aria-hidden="true" width="20" height="20" class="size-5" />
           <span class="text-mono-label">// signin</span>
         </div>
-        <h1 class="sr-only">Sign in to sanmon</h1>
+        <h1 class="sr-only">Sign in to torii</h1>
         <CardTitle class="text-2xl tracking-tight">Welcome back</CardTitle>
         <CardDescription>Sign in with your username or email.</CardDescription>
       </CardHeader>

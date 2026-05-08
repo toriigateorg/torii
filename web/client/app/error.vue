@@ -30,7 +30,7 @@ const host = computed(() => (import.meta.client ? window.location.host : ""))
 
 const detail = computed(() => {
   if (isUnknownDomain.value) {
-    return "An administrator hasn't connected a service to this hostname. You're authenticated with sanmon — head back to the dashboard or sign in elsewhere."
+    return "An administrator hasn't connected a service to this hostname. You're authenticated with torii — head back to the dashboard or sign in elsewhere."
   }
   if (code.value === 401) {
     return "You don't have access to this page. Sign in with an admin account, or head back home."
@@ -39,17 +39,17 @@ const detail = computed(() => {
 })
 
 function goDashboard() {
-  const sanmonHost = useRuntimeConfig().public.sanmonUrl
-  if (import.meta.client && sanmonHost && window.location.host !== sanmonHost) {
-    window.location.assign(`${window.location.protocol}//${sanmonHost}/dashboard`)
+  const toriiHost = useRuntimeConfig().public.toriiUrl
+  if (import.meta.client && toriiHost && window.location.host !== toriiHost) {
+    window.location.assign(`${window.location.protocol}//${toriiHost}/dashboard`)
     return
   }
   clearError({ redirect: "/dashboard" })
 }
 function goHome() {
-  const sanmonHost = useRuntimeConfig().public.sanmonUrl
-  if (import.meta.client && sanmonHost && window.location.host !== sanmonHost) {
-    window.location.assign(`${window.location.protocol}//${sanmonHost}/`)
+  const toriiHost = useRuntimeConfig().public.toriiUrl
+  if (import.meta.client && toriiHost && window.location.host !== toriiHost) {
+    window.location.assign(`${window.location.protocol}//${toriiHost}/`)
     return
   }
   clearError({ redirect: "/" })
@@ -70,16 +70,16 @@ function goHome() {
 
     <div class="relative mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 min-h-screen flex flex-col">
       <header class="flex items-center justify-between py-6">
-        <NuxtLink to="/" class="flex items-center gap-2 group" aria-label="sanmon — home">
+        <NuxtLink to="/" class="flex items-center gap-2 group" aria-label="torii — home">
           <img
-            src="/sanmon-logo.svg"
+            src="/torii-logo.svg"
             alt=""
             aria-hidden="true"
             width="24"
             height="24"
             class="size-6 rounded-md"
           />
-          <span class="font-semibold tracking-tight text-sm">sanmon</span>
+          <span class="font-semibold tracking-tight text-sm">torii</span>
         </NuxtLink>
         <span class="font-mono text-[10px] tracking-[0.2em] uppercase text-muted-foreground">
           err / {{ code }}
@@ -151,14 +151,14 @@ function goHome() {
             <!-- Footer trace -->
             <div class="border-t border-border/60 px-5 sm:px-6 py-3.5 bg-muted/10 flex items-center justify-between font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
               <span>fig.err · {{ code }}</span>
-              <span class="hidden sm:inline">sanmon edge</span>
+              <span class="hidden sm:inline">torii edge</span>
             </div>
           </div>
         </div>
       </div>
 
       <footer class="py-6 flex items-center justify-between text-mono-label">
-        <span>&copy; 2026 sanmon</span>
+        <span>&copy; 2026 torii</span>
         <span>
           crafted by
           <a

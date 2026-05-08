@@ -4,7 +4,7 @@ import type { AuthUser } from "~/composables/useAuth"
 import type { Role, Service, CreateRolePayload } from "~/composables/useAdminApi"
 
 definePageMeta({ middleware: ["auth", "admin"] })
-useHead({ title: "Admin · Roles — sanmon" })
+useHead({ title: "Admin · Roles — torii" })
 
 const api = useAdminApi()
 

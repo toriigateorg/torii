@@ -16,7 +16,7 @@ func ProxyTo(svc *CachedService, c *echo.Context) error {
 	rp.Director = func(req *http.Request) {
 		originalDirector(req)
 		req.Host = svc.Target.Host
-		// Disable upstream compression so we can splice the sanmon
+		// Disable upstream compression so we can splice the torii
 		// overlay into HTML responses without having to decode gzip/br.
 		req.Header.Del("Accept-Encoding")
 		for k, v := range svc.Headers {

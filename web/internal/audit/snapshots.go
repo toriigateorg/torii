@@ -3,7 +3,7 @@ package audit
 import (
 	"encoding/json"
 
-	"sanmon/internal/db"
+	"torii/internal/db"
 )
 
 const Redacted = "[redacted]"

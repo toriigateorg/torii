@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"sanmon/internal/db"
+	"torii/internal/db"
 )
 
 type CachedService struct {
