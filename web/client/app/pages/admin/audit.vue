@@ -3,7 +3,7 @@ import { Search, X } from "lucide-vue-next"
 import type { AuditLog, AuditLogQuery } from "~/composables/useAdminApi"
 
 definePageMeta({ middleware: ["auth", "admin"] })
-useHead({ title: "Admin · Audit log — torii" })
+useSeoMeta({ title: "Admin · Audit log — torii", robots: "noindex, nofollow" })
 
 const api = useAdminApi()
 

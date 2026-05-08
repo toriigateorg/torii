@@ -2,7 +2,7 @@
 import { ArrowUpRight, Globe, Inbox } from "lucide-vue-next"
 
 definePageMeta({ middleware: "auth" })
-useHead({ title: "Dashboard — torii" })
+useSeoMeta({ title: "Dashboard — torii", robots: "noindex, nofollow" })
 
 type Service = {
   id: string

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { RefreshCw, CheckCircle2, XCircle, AlertTriangle } from "lucide-vue-next"
 
-useHead({ title: "torii — health" })
+useSeoMeta({ title: "torii — health", robots: "noindex, nofollow" })
 
 type HealthResponse = { all: boolean; db: boolean; api: boolean }
 

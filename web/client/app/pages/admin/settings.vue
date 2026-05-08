@@ -1,6 +1,6 @@
 <script setup lang="ts">
 definePageMeta({ middleware: ["auth", "admin"] })
-useHead({ title: "Admin · Settings — torii" })
+useSeoMeta({ title: "Admin · Settings — torii", robots: "noindex, nofollow" })
 
 const api = useAdminApi()
 

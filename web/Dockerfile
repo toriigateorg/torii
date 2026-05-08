@@ -10,6 +10,10 @@ RUN bun install --frozen-lockfile
 
 # Then bring in sources and build the static SPA.
 COPY client/ ./
+
+# Public site URL baked into prerendered HTML (canonical, og:url, sitemap).
+ARG SITE_URL=https://toriigate.org
+ENV SITE_URL=${SITE_URL}
 RUN bun run generate
 
 # ---------- Stage 2: build the Go binary with the SPA embedded ----------

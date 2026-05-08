@@ -12,12 +12,34 @@ import {
   ChevronRight,
 } from "lucide-vue-next"
 
-useHead({
+useSeoMeta({
   title: "torii — identity-aware reverse proxy",
-  meta: [
-    { name: "description", content: "A reverse HTTP proxy with built-in authentication and role-based access control. Front your services with policy, not plumbing." },
-  ],
+  description: "Open-source zero trust gateway. Self-host a single Go binary at your edge for SSO, RBAC, and HTTP-aware reverse proxying — no SDK rewrites in your services.",
+  ogTitle: "torii — identity-aware reverse proxy",
+  ogDescription: "Open-source zero trust gateway. Self-host SSO, RBAC, and reverse proxy as one Go binary.",
+  twitterTitle: "torii — identity-aware reverse proxy",
+  twitterDescription: "Open-source zero trust gateway. Self-host SSO, RBAC, and reverse proxy as one Go binary.",
+  keywords: "identity-aware reverse proxy, zero trust gateway, open source SSO, RBAC proxy, auth gateway, self-hosted authentication, OIDC proxy, SAML proxy",
 })
+
+defineOgImageComponent("ToriiOg", {
+  title: "Identity-aware reverse proxy",
+  description: "Auth, RBAC, and routing in one open-source Go binary.",
+})
+
+useSchemaOrg([
+  defineSoftwareApp({
+    name: "torii",
+    applicationCategory: "DeveloperApplication",
+    operatingSystem: "Linux, macOS, Windows (Docker)",
+    offers: {
+      "@type": "Offer",
+      price: "0",
+      priceCurrency: "USD",
+    },
+    description: "Open-source identity-aware reverse proxy with built-in auth and RBAC. Front your services with policy, not plumbing.",
+  }),
+])
 
 const features = [
   {
@@ -103,7 +125,7 @@ onBeforeUnmount(() => {
               </span>
             </div>
 
-            <p class="text-mono-label mb-5">// reverse proxy / auth / rbac</p>
+            <p class="text-mono-label mb-5">// open-source identity-aware reverse proxy</p>
 
             <h1 id="hero-title" class="text-4xl sm:text-5xl lg:text-7xl font-semibold tracking-tight leading-[0.95]">
               The edge between

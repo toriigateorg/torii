@@ -1,7 +1,11 @@
 <script setup lang="ts">
 definePageMeta({ middleware: "guest" })
 
-useHead({ title: "Sign in — torii" })
+useSeoMeta({
+  title: "Sign in — torii",
+  description: "Sign in to your torii instance.",
+  robots: "noindex, follow",
+})
 
 const { signin } = useAuth()
 const route = useRoute()

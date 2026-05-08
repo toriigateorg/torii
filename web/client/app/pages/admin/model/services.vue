@@ -3,7 +3,7 @@ import { Plus, Trash2, Pencil, X } from "lucide-vue-next"
 import type { Service, ServicePayload } from "~/composables/useAdminApi"
 
 definePageMeta({ middleware: ["auth", "admin"] })
-useHead({ title: "Admin · Services — torii" })
+useSeoMeta({ title: "Admin · Services — torii", robots: "noindex, nofollow" })
 
 const api = useAdminApi()
 

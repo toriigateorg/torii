@@ -3,7 +3,7 @@ import { Users, Shield, Server, ShieldCheck, LogIn, KeyRound, Inbox, Globe } fro
 import type { StatsResponse, StatsWindow } from "~/composables/useAdminApi"
 
 definePageMeta({ middleware: ["auth", "admin"] })
-useHead({ title: "Admin · Stats — torii" })
+useSeoMeta({ title: "Admin · Stats — torii", robots: "noindex, nofollow" })
 
 const api = useAdminApi()
 

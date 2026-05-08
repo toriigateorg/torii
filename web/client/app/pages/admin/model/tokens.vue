@@ -3,7 +3,7 @@ import { Trash2, Eraser } from "lucide-vue-next"
 import type { TokenSession } from "~/composables/useAdminApi"
 
 definePageMeta({ middleware: ["auth", "admin"] })
-useHead({ title: "Admin · Tokens — torii" })
+useSeoMeta({ title: "Admin · Tokens — torii", robots: "noindex, nofollow" })
 
 const api = useAdminApi()
 

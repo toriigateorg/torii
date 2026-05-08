@@ -3,7 +3,11 @@ import { UserPlus } from "lucide-vue-next"
 
 definePageMeta({ middleware: "guest" })
 
-useHead({ title: "Sign up — torii" })
+useSeoMeta({
+  title: "Sign up — torii",
+  description: "Create a torii account.",
+  robots: "noindex, follow",
+})
 
 const { signup } = useAuth()
 
