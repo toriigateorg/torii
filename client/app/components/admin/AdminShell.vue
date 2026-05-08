@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { Users, KeyRound, Server, Shield, LogIn, Settings, ScrollText } from "lucide-vue-next"
+import { Users, KeyRound, Server, Shield, LogIn, Settings, ScrollText, BarChart3 } from "lucide-vue-next"
 
 const route = useRoute()
 const links = [
+  { to: "/admin/stats", label: "Stats", icon: BarChart3 },
   { to: "/admin/model/users", label: "Users", icon: Users },
   { to: "/admin/model/roles", label: "Roles", icon: Shield },
   { to: "/admin/model/tokens", label: "Tokens", icon: KeyRound },

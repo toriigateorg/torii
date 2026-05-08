@@ -36,3 +36,29 @@ WHERE (sqlc.narg('actor_user_id')::uuid IS NULL OR actor_user_id = sqlc.narg('ac
 
 -- name: DeleteAuditLogsBefore :execrows
 DELETE FROM audit_logs WHERE created_at < $1;
+
+-- name: CountAuditLogsByDay :many
+SELECT
+    date_trunc('day', created_at AT TIME ZONE 'UTC')::timestamptz AS day,
+    count(*)::bigint AS count
+FROM audit_logs
+WHERE created_at >= sqlc.arg('from_ts')::timestamptz
+  AND created_at <  sqlc.arg('to_ts')::timestamptz
+GROUP BY 1
+ORDER BY 1 ASC;
+
+-- name: TopServicesByAccess :many
+SELECT
+    s.id,
+    s.title,
+    s.domain,
+    count(*)::bigint AS access_count
+FROM audit_logs a
+JOIN services s ON s.id = a.target_id
+WHERE a.event_type = 'proxy.access'
+  AND a.target_type = 'service'
+  AND a.created_at >= sqlc.arg('from_ts')::timestamptz
+  AND a.created_at <  sqlc.arg('to_ts')::timestamptz
+GROUP BY s.id, s.title, s.domain
+ORDER BY access_count DESC, s.title ASC
+LIMIT sqlc.arg('lim')::int;

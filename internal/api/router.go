@@ -117,6 +117,7 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	v1.PUT("/admin/settings", h.adminUpdateSettings, gate(auth.PermSettingsUpdate))
 
 	v1.GET("/admin/audit", h.adminListAuditLogs, gate(auth.PermAuditRead))
+	v1.GET("/admin/stats", h.adminGetStats, gate(auth.PermAuditRead))
 
 	v1.GET("/auth/config", h.publicAuthConfig)
 	v1.GET("/auth/providers", h.publicListProviders)

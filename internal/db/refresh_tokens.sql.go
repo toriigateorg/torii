@@ -12,6 +12,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countActiveRefreshTokens = `-- name: CountActiveRefreshTokens :one
+SELECT count(*) FROM refresh_tokens
+WHERE revoked_at IS NULL AND expires_at > now()
+`
+
+func (q *Queries) CountActiveRefreshTokens(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveRefreshTokens)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countRefreshTokens = `-- name: CountRefreshTokens :one
 SELECT count(*) FROM refresh_tokens
 `

@@ -152,6 +152,22 @@ export interface SSOProviderPayload {
   link_by_email: boolean
 }
 
+export type StatsWindow = "7d" | "30d" | "90d"
+
+export interface StatsResponse {
+  window: StatsWindow
+  counters: {
+    users: number
+    admins: number
+    services: number
+    roles: number
+    sso_providers: number
+    active_sessions: number
+  }
+  activity: { day: string; count: number }[]
+  top_services: { id: string; title: string; domain: string; access_count: number }[]
+}
+
 export function useAdminApi() {
   const { authHeaders } = useAuth()
 
@@ -161,6 +177,12 @@ export function useAdminApi() {
   })
 
   return {
+    stats(window: StatsWindow) {
+      return $fetch<StatsResponse>("/api/v1/admin/stats", {
+        ...opts(),
+        query: { window },
+      })
+    },
     listUsers(page: number, pageSize = 20) {
       return $fetch<UserListResponse>("/api/v1/admin/users", {
         ...opts(),

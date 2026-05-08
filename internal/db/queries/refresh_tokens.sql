@@ -33,6 +33,10 @@ LIMIT sqlc.arg('lim')::int OFFSET sqlc.arg('off')::int;
 -- name: CountRefreshTokens :one
 SELECT count(*) FROM refresh_tokens;
 
+-- name: CountActiveRefreshTokens :one
+SELECT count(*) FROM refresh_tokens
+WHERE revoked_at IS NULL AND expires_at > now();
+
 -- name: GetRefreshTokenByID :one
 SELECT * FROM refresh_tokens WHERE id = $1;
 

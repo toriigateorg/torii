@@ -46,6 +46,47 @@ func (q *Queries) CountAuditLogs(ctx context.Context, arg CountAuditLogsParams) 
 	return count, err
 }
 
+const countAuditLogsByDay = `-- name: CountAuditLogsByDay :many
+SELECT
+    date_trunc('day', created_at AT TIME ZONE 'UTC')::timestamptz AS day,
+    count(*)::bigint AS count
+FROM audit_logs
+WHERE created_at >= $1::timestamptz
+  AND created_at <  $2::timestamptz
+GROUP BY 1
+ORDER BY 1 ASC
+`
+
+type CountAuditLogsByDayParams struct {
+	FromTs pgtype.Timestamptz
+	ToTs   pgtype.Timestamptz
+}
+
+type CountAuditLogsByDayRow struct {
+	Day   pgtype.Timestamptz
+	Count int64
+}
+
+func (q *Queries) CountAuditLogsByDay(ctx context.Context, arg CountAuditLogsByDayParams) ([]CountAuditLogsByDayRow, error) {
+	rows, err := q.db.Query(ctx, countAuditLogsByDay, arg.FromTs, arg.ToTs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountAuditLogsByDayRow
+	for rows.Next() {
+		var i CountAuditLogsByDayRow
+		if err := rows.Scan(&i.Day, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteAuditLogsBefore = `-- name: DeleteAuditLogsBefore :execrows
 DELETE FROM audit_logs WHERE created_at < $1
 `
@@ -168,6 +209,61 @@ func (q *Queries) ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([
 			&i.ClientIp,
 			&i.UserAgent,
 			&i.Metadata,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const topServicesByAccess = `-- name: TopServicesByAccess :many
+SELECT
+    s.id,
+    s.title,
+    s.domain,
+    count(*)::bigint AS access_count
+FROM audit_logs a
+JOIN services s ON s.id = a.target_id
+WHERE a.event_type = 'proxy.access'
+  AND a.target_type = 'service'
+  AND a.created_at >= $1::timestamptz
+  AND a.created_at <  $2::timestamptz
+GROUP BY s.id, s.title, s.domain
+ORDER BY access_count DESC, s.title ASC
+LIMIT $3::int
+`
+
+type TopServicesByAccessParams struct {
+	FromTs pgtype.Timestamptz
+	ToTs   pgtype.Timestamptz
+	Lim    int32
+}
+
+type TopServicesByAccessRow struct {
+	ID          uuid.UUID
+	Title       string
+	Domain      string
+	AccessCount int64
+}
+
+func (q *Queries) TopServicesByAccess(ctx context.Context, arg TopServicesByAccessParams) ([]TopServicesByAccessRow, error) {
+	rows, err := q.db.Query(ctx, topServicesByAccess, arg.FromTs, arg.ToTs, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TopServicesByAccessRow
+	for rows.Next() {
+		var i TopServicesByAccessRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Domain,
+			&i.AccessCount,
 		); err != nil {
 			return nil, err
 		}
