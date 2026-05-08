@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"net/url"
@@ -88,6 +90,19 @@ var (
 	emailRe    = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
 )
 
+// hashIdentifier returns a stable hex digest of an email/username for use in
+// failed-signin/signup audit events. Logging the raw value would leak PII to
+// anyone with shell access (audit.jsonl is on-disk), and to any operator
+// with audit.read for accounts they don't own. Hashing preserves the
+// "same identifier was attempted N times" signal while removing the PII.
+func hashIdentifier(s string) string {
+	if s == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(s))))
+	return hex.EncodeToString(sum[:])
+}
+
 func (h *authHandlers) signup(c *echo.Context) error {
 	var req signupReq
 	if err := c.Bind(&req); err != nil {
@@ -102,9 +117,9 @@ func (h *authHandlers) signup(c *echo.Context) error {
 		h.auditor.LogFromEcho(c, audit.Event{
 			EventType: audit.EventSignupFailed,
 			Metadata: map[string]any{
-				"username": req.Username,
-				"email":    req.Email,
-				"reason":   reason,
+				"username_hash": hashIdentifier(req.Username),
+				"email_hash":    hashIdentifier(req.Email),
+				"reason":        reason,
 			},
 		})
 	}
@@ -139,6 +154,14 @@ func (h *authHandlers) signup(c *echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	}
 	defer tx.Rollback(ctx)
+
+	// Serialize signup transactions so two concurrent first-user signups
+	// can't both observe count == 0 and both be granted admin. The lock
+	// is released automatically at commit/rollback. The integer is
+	// arbitrary — picked once and never reused for any other purpose.
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", int64(74331)); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
 
 	qtx := h.q.WithTx(tx)
 
@@ -223,8 +246,8 @@ func (h *authHandlers) signin(c *echo.Context) error {
 			ActorUserID:   uid,
 			ActorUsername: username,
 			Metadata: map[string]any{
-				"identifier": req.Identifier,
-				"reason":     reason,
+				"identifier_hash": hashIdentifier(req.Identifier),
+				"reason":          reason,
 			},
 		})
 	}
@@ -242,12 +265,24 @@ func (h *authHandlers) signin(c *echo.Context) error {
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	}
-	if !user.PasswordHash.Valid || !auth.VerifyPassword(user.PasswordHash.String, req.Password) {
-		uid := user.ID
-		signinFail("bad_password", &uid, user.Username)
+	uid := user.ID
+	ctx := c.Request().Context()
+	if user.LockedUntil.Valid && time.Now().Before(user.LockedUntil.Time) {
+		signinFail("account_locked", &uid, user.Username)
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 	}
-	uid := user.ID
+	if !user.PasswordHash.Valid || !auth.VerifyPassword(user.PasswordHash.String, req.Password) {
+		row, _ := h.q.IncrementFailedLogin(ctx, uid)
+		reason := "bad_password"
+		if row.LockedUntil.Valid && time.Now().Before(row.LockedUntil.Time) {
+			reason = "account_locked_after_failures"
+		}
+		signinFail(reason, &uid, user.Username)
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
+	}
+	if user.FailedLoginCount > 0 || user.LockedUntil.Valid {
+		_ = h.q.ResetFailedLogin(ctx, uid)
+	}
 	h.auditor.LogFromEcho(c, audit.Event{
 		EventType:     audit.EventSigninSuccess,
 		ActorUserID:   &uid,

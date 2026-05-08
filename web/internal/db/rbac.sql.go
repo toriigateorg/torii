@@ -501,7 +501,7 @@ func (q *Queries) ListUserRoles(ctx context.Context, userID uuid.UUID) ([]Role, 
 }
 
 const listUsersInRole = `-- name: ListUsersInRole :many
-SELECT u.id, u.username, u.email, u.first_name, u.last_name, u.password_hash, u.created_at, u.updated_at
+SELECT u.id, u.username, u.email, u.first_name, u.last_name, u.password_hash, u.created_at, u.updated_at, u.failed_login_count, u.locked_until
 FROM users u
 JOIN user_roles ur ON ur.user_id = u.id
 WHERE ur.role_id = $1
@@ -533,6 +533,8 @@ func (q *Queries) ListUsersInRole(ctx context.Context, arg ListUsersInRoleParams
 			&i.PasswordHash,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.FailedLoginCount,
+			&i.LockedUntil,
 		); err != nil {
 			return nil, err
 		}

@@ -97,14 +97,16 @@ type SsoProvider struct {
 }
 
 type User struct {
-	ID           uuid.UUID
-	Username     string
-	Email        string
-	FirstName    string
-	LastName     string
-	PasswordHash pgtype.Text
-	CreatedAt    pgtype.Timestamptz
-	UpdatedAt    pgtype.Timestamptz
+	ID               uuid.UUID
+	Username         string
+	Email            string
+	FirstName        string
+	LastName         string
+	PasswordHash     pgtype.Text
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+	FailedLoginCount int32
+	LockedUntil      pgtype.Timestamptz
 }
 
 type UserIdentity struct {

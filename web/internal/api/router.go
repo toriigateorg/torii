@@ -110,6 +110,7 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	v1.POST("/logout", h.logout)
 	v1.GET("/me", h.me, auth.RequireUser(cfg.JWTSecret))
 	v1.GET("/me/services", h.myServices, auth.RequireUser(cfg.JWTSecret))
+	v1.POST("/me/password", h.changeMyPassword, auth.RequireUser(cfg.JWTSecret))
 
 	secret := cfg.JWTSecret
 	onDenied := func(c *echo.Context, perm string) {
@@ -130,6 +131,8 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	v1.GET("/admin/users", h.adminListUsers, gate(auth.PermUsersRead))
 	v1.POST("/admin/users", h.adminCreateUser, gate(auth.PermUsersCreate))
 	v1.DELETE("/admin/users/:id", h.adminDeleteUser, gate(auth.PermUsersDelete))
+	v1.POST("/admin/users/:id/password", h.adminResetUserPassword, gate(auth.PermUsersUpdate))
+	v1.POST("/admin/users/:id/revoke_sessions", h.adminRevokeUserSessions, gate(auth.PermUsersUpdate))
 	v1.GET("/admin/users/:id/roles", h.adminListUserRoles, gate(auth.PermUserRolesRead))
 	v1.POST("/admin/users/:id/roles", h.adminAssignUserRole, gate(auth.PermUserRolesCreate))
 	v1.DELETE("/admin/users/:id/roles/:rid", h.adminRevokeUserRole, gate(auth.PermUserRolesDelete))
@@ -177,6 +180,10 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	v1.GET("/auth/providers", h.publicListProviders)
 	v1.GET("/oauth/:slug/start", h.oauthStart, authLimiter)
 	v1.GET("/oauth/:slug/callback", h.oauthCallback, authLimiter)
+	// Cross-host SSO handoff: lands on a service domain, exchanges a
+	// short-lived torii-signed token for cookies on that host. Reachable
+	// on any host because that's the whole point.
+	v1.GET("/sso_handoff", h.ssoHandoff, refreshLimiter)
 
 	return h
 }

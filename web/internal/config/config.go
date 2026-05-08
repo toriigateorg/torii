@@ -63,7 +63,7 @@ func Load() (*Config, error) {
 	return &Config{
 		AppEnv:                 env,
 		JWTSecret:              []byte(secret),
-		AccessTokenTTL:         time.Duration(intEnv("ACCESS_TOKEN_EXPIRY_MINS", 5)) * time.Minute,
+		AccessTokenTTL:         time.Duration(intEnv("ACCESS_TOKEN_EXPIRY_MINS", 1)) * time.Minute,
 		RefreshTokenTTL:        time.Duration(intEnv("REFRESH_TOKEN_EXPIRY_DAYS", 7)) * 24 * time.Hour,
 		ToriiURL:               toriiURL,
 		AuditLogDir:            auditDir,

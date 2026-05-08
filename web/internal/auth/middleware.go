@@ -57,6 +57,16 @@ func RequirePermission(secret []byte, perm string, onDenied func(c *echo.Context
 func authenticate(c *echo.Context, secret []byte) (*Claims, error) {
 	tok := bearerToken(c)
 	if tok == "" {
+		// CSRF defense: state-changing methods must carry a Bearer token.
+		// SameSite=Lax blocks cross-site cookie sends on cross-origin XHR
+		// but a top-level form POST still rides along — without this gate,
+		// any future endpoint accepting a non-JSON body would be CSRF-able.
+		// The SPA always sends Bearer via useAuth().authHeaders(); the
+		// cookie is purely a hydration aid for the proxy dispatch on
+		// service domains (read-only navigations).
+		if isStateChanging(c.Request().Method) && !isCookieAllowedPath(c.Request().URL.Path) {
+			return nil, errMissingToken
+		}
 		if ck, err := c.Cookie(AccessCookie); err == nil {
 			tok = ck.Value
 		}
@@ -71,6 +81,21 @@ func authenticate(c *echo.Context, secret []byte) (*Claims, error) {
 		return apiTokenResolver(c.Request().Context(), tok)
 	}
 	return ParseAccessToken(tok, secret)
+}
+
+func isStateChanging(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	}
+	return false
+}
+
+// isCookieAllowedPath lists endpoints that legitimately authenticate via the
+// access cookie alone, even on state-changing methods. /logout must succeed
+// even if the SPA's in-memory token was lost (idempotent cleanup).
+func isCookieAllowedPath(path string) bool {
+	return path == "/api/v1/logout"
 }
 
 var errMissingToken = errors.New("missing token")

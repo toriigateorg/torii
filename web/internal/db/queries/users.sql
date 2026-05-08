@@ -22,3 +22,27 @@ SELECT count(*) FROM users;
 
 -- name: DeleteUser :exec
 DELETE FROM users WHERE id = $1;
+
+-- name: UpdateUserPassword :exec
+UPDATE users
+SET password_hash = $2,
+    updated_at = now()
+WHERE id = $1;
+
+-- name: IncrementFailedLogin :one
+UPDATE users
+SET failed_login_count = failed_login_count + 1,
+    locked_until = CASE
+        WHEN failed_login_count + 1 >= 10 THEN now() + interval '15 minutes'
+        ELSE locked_until
+    END,
+    updated_at = now()
+WHERE id = $1
+RETURNING failed_login_count, locked_until;
+
+-- name: ResetFailedLogin :exec
+UPDATE users
+SET failed_login_count = 0,
+    locked_until = NULL,
+    updated_at = now()
+WHERE id = $1;

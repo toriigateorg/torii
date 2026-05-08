@@ -36,6 +36,9 @@ const (
 	EventSigninFailed         = "auth.signin.failed"
 	EventSigninSSO            = "auth.signin.sso"
 	EventLogout               = "auth.logout"
+	EventPasswordChanged      = "auth.password.changed"
+	EventPasswordResetByAdmin = "auth.password.reset_by_admin"
+	EventSessionsRevoked      = "auth.sessions.revoked_by_admin"
 	EventTokenRefreshFailed   = "auth.token_refresh.failed"
 	EventAuthzDenied          = "authz.denied"
 	EventUserCreated          = "rbac.user.created"
@@ -87,7 +90,11 @@ func New(q *db.Queries, dir string) (*Logger, error) {
 		return nil, fmt.Errorf("audit: mkdir %s: %w", dir, err)
 	}
 	path := filepath.Join(dir, "audit.jsonl")
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	// 0o640: owner read/write, group read, world none. The audit log
+	// records signin failures with identifiers (and PII when audit
+	// metadata isn't redacted), so it should not be world-readable. Run
+	// torii under a dedicated user so only its group can tail the log.
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
 	if err != nil {
 		return nil, fmt.Errorf("audit: open %s: %w", path, err)
 	}

@@ -26,7 +26,7 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (username, email, first_name, last_name, password_hash)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, username, email, first_name, last_name, password_hash, created_at, updated_at
+RETURNING id, username, email, first_name, last_name, password_hash, created_at, updated_at, failed_login_count, locked_until
 `
 
 type CreateUserParams struct {
@@ -55,6 +55,8 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.PasswordHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.FailedLoginCount,
+		&i.LockedUntil,
 	)
 	return i, err
 }
@@ -69,7 +71,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) error {
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, email, first_name, last_name, password_hash, created_at, updated_at FROM users WHERE id = $1
+SELECT id, username, email, first_name, last_name, password_hash, created_at, updated_at, failed_login_count, locked_until FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -84,12 +86,14 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.PasswordHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.FailedLoginCount,
+		&i.LockedUntil,
 	)
 	return i, err
 }
 
 const getUserByUsernameOrEmail = `-- name: GetUserByUsernameOrEmail :one
-SELECT id, username, email, first_name, last_name, password_hash, created_at, updated_at FROM users
+SELECT id, username, email, first_name, last_name, password_hash, created_at, updated_at, failed_login_count, locked_until FROM users
 WHERE lower(username) = lower($1::text)
    OR lower(email) = lower($1::text)
 LIMIT 1
@@ -107,12 +111,38 @@ func (q *Queries) GetUserByUsernameOrEmail(ctx context.Context, dollar_1 string)
 		&i.PasswordHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.FailedLoginCount,
+		&i.LockedUntil,
 	)
 	return i, err
 }
 
+const incrementFailedLogin = `-- name: IncrementFailedLogin :one
+UPDATE users
+SET failed_login_count = failed_login_count + 1,
+    locked_until = CASE
+        WHEN failed_login_count + 1 >= 10 THEN now() + interval '15 minutes'
+        ELSE locked_until
+    END,
+    updated_at = now()
+WHERE id = $1
+RETURNING failed_login_count, locked_until
+`
+
+type IncrementFailedLoginRow struct {
+	FailedLoginCount int32
+	LockedUntil      pgtype.Timestamptz
+}
+
+func (q *Queries) IncrementFailedLogin(ctx context.Context, id uuid.UUID) (IncrementFailedLoginRow, error) {
+	row := q.db.QueryRow(ctx, incrementFailedLogin, id)
+	var i IncrementFailedLoginRow
+	err := row.Scan(&i.FailedLoginCount, &i.LockedUntil)
+	return i, err
+}
+
 const listUsers = `-- name: ListUsers :many
-SELECT id, username, email, first_name, last_name, password_hash, created_at, updated_at FROM users
+SELECT id, username, email, first_name, last_name, password_hash, created_at, updated_at, failed_login_count, locked_until FROM users
 ORDER BY created_at ASC, id ASC
 LIMIT $2::int OFFSET $1::int
 `
@@ -140,6 +170,8 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 			&i.PasswordHash,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.FailedLoginCount,
+			&i.LockedUntil,
 		); err != nil {
 			return nil, err
 		}
@@ -149,4 +181,34 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 		return nil, err
 	}
 	return items, nil
+}
+
+const resetFailedLogin = `-- name: ResetFailedLogin :exec
+UPDATE users
+SET failed_login_count = 0,
+    locked_until = NULL,
+    updated_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) ResetFailedLogin(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, resetFailedLogin, id)
+	return err
+}
+
+const updateUserPassword = `-- name: UpdateUserPassword :exec
+UPDATE users
+SET password_hash = $2,
+    updated_at = now()
+WHERE id = $1
+`
+
+type UpdateUserPasswordParams struct {
+	ID           uuid.UUID
+	PasswordHash pgtype.Text
+}
+
+func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
+	_, err := q.db.Exec(ctx, updateUserPassword, arg.ID, arg.PasswordHash)
+	return err
 }

@@ -20,14 +20,16 @@ import (
 	"golang.org/x/oauth2"
 
 	"torii/internal/audit"
+	"torii/internal/auth"
 	"torii/internal/db"
 )
 
 const (
-	ssoStateCookie = "sso_state"
-	ssoNonceCookie = "sso_nonce"
-	ssoCookiePath  = "/api/v1/oauth/"
-	ssoCookieTTL   = 10 * time.Minute
+	ssoStateCookie      = "sso_state"
+	ssoNonceCookie      = "sso_nonce"
+	ssoReturnHostCookie = "sso_return_host"
+	ssoCookiePath       = "/api/v1/oauth/"
+	ssoCookieTTL        = 10 * time.Minute
 )
 
 type cachedOIDCProvider struct {
@@ -52,21 +54,18 @@ func (h *authHandlers) oidcProviderFor(ctx context.Context, p db.SsoProvider) (*
 	return prov, nil
 }
 
-func (h *authHandlers) oauthRedirectURL(c *echo.Context, slug string) string {
-	r := c.Request()
-	scheme := "http"
-	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
-		scheme = proto
-	} else if r.TLS != nil {
-		scheme = "https"
-	} else if h.cfg.IsProd() {
-		scheme = "https"
+func (h *authHandlers) oauthRedirectURL(_ *echo.Context, slug string) string {
+	// Build the OIDC redirect_uri purely from configured values. Reading
+	// X-Forwarded-Host / X-Forwarded-Proto from the inbound request would
+	// let an attacker override the redirect_uri to evil.com simply by
+	// setting the header on /oauth/<slug>/start — IdPs that allow wildcard
+	// redirect registration would then bounce the user (and the code) to
+	// the attacker.
+	scheme := "https"
+	if !h.cfg.IsProd() {
+		scheme = "http"
 	}
-	host := r.Host
-	if fwd := r.Header.Get("X-Forwarded-Host"); fwd != "" {
-		host = fwd
-	}
-	return scheme + "://" + host + "/api/v1/oauth/" + slug + "/callback"
+	return scheme + "://" + h.cfg.ToriiURL + "/api/v1/oauth/" + slug + "/callback"
 }
 
 func (h *authHandlers) oauth2Config(c *echo.Context, prov *oidc.Provider, p db.SsoProvider) *oauth2.Config {
@@ -134,6 +133,17 @@ func (h *authHandlers) setSSOTempCookie(c *echo.Context, name, value string) {
 	})
 }
 
+// isKnownServiceHost reports whether host appears in the proxy's service
+// cache. Used to gate cross-host SSO handoff so an attacker can't direct a
+// freshly-issued handoff token at an arbitrary destination.
+func (h *authHandlers) isKnownServiceHost(ctx context.Context, host string) bool {
+	if h.cache == nil || host == "" {
+		return false
+	}
+	_, ok := h.cache.Lookup(ctx, host)
+	return ok
+}
+
 func (h *authHandlers) clearSSOTempCookie(c *echo.Context, name string) {
 	c.SetCookie(&http.Cookie{
 		Name:     name,
@@ -150,6 +160,42 @@ func (h *authHandlers) clearSSOTempCookie(c *echo.Context, name string) {
 func (h *authHandlers) oauthStart(c *echo.Context) error {
 	slug := c.Param("slug")
 	ctx := c.Request().Context()
+
+	// SSO state/nonce cookies are scoped to whichever host /start runs on,
+	// but the IdP's registered redirect_uri is fixed to cfg.ToriiURL. If a
+	// user clicks "Sign in with X" from a service domain (or any non-torii
+	// alias) the cookies would be set on the service host and the callback
+	// — which always lands on torii — wouldn't see them. Bounce through
+	// torii's /start first so cookies and callback share an origin.
+	if !h.cfg.IsToriiHost(c.Request().Host) {
+		scheme := "https"
+		if !h.cfg.IsProd() {
+			scheme = "http"
+		}
+		// Tag the bounce so /start on torii knows the user originated on a
+		// non-torii host and should be handed back there post-SSO.
+		q := c.Request().URL.Query()
+		if q.Get("return_to_host") == "" {
+			q.Set("return_to_host", c.Request().Host)
+		}
+		target := scheme + "://" + h.cfg.ToriiURL + c.Request().URL.Path + "?" + q.Encode()
+		return c.Redirect(http.StatusFound, target)
+	}
+
+	// Originating host carried over from the cross-host bounce above.
+	// Persist it in a cookie so /callback (which lands here on torii) can
+	// recover it after the IdP round-trip. Only honor known service hosts
+	// — falling back to torii otherwise — so an attacker can't use the
+	// bounce to land users on an arbitrary post-SSO destination.
+	if rh := c.QueryParam("return_to_host"); rh != "" {
+		if h.isKnownServiceHost(ctx, rh) {
+			h.setSSOTempCookie(c, ssoReturnHostCookie, rh)
+		} else {
+			h.clearSSOTempCookie(c, ssoReturnHostCookie)
+		}
+	} else {
+		h.clearSSOTempCookie(c, ssoReturnHostCookie)
+	}
 
 	p, err := h.q.GetSSOProviderBySlug(ctx, slug)
 	if err != nil || !p.Enabled {
@@ -265,9 +311,9 @@ func (h *authHandlers) oauthCallback(c *echo.Context) error {
 		h.auditor.LogFromEcho(c, audit.Event{
 			EventType: audit.EventSigninFailed,
 			Metadata: map[string]any{
-				"identifier": email,
-				"reason":     "sso_" + err.Error(),
-				"provider":   p.Slug,
+				"identifier_hash": hashIdentifier(email),
+				"reason":          "sso_" + err.Error(),
+				"provider":        p.Slug,
 			},
 		})
 		return c.Redirect(http.StatusFound, "/signin?error=sso_"+err.Error())
@@ -292,7 +338,61 @@ func (h *authHandlers) oauthCallback(c *echo.Context) error {
 			"email_verified": claims.EmailVerified,
 		},
 	})
+
+	// If the user originated on a service host, hand them back there with
+	// a one-shot signed token so they end up authenticated on the host
+	// they came from rather than stranded on torii's dashboard. The cookie
+	// was set in /start; isKnownServiceHost was already enforced there.
+	if rh, err := c.Cookie(ssoReturnHostCookie); err == nil && rh.Value != "" {
+		h.clearSSOTempCookie(c, ssoReturnHostCookie)
+		if h.isKnownServiceHost(ctx, rh.Value) {
+			tok, err := auth.IssueHandoffToken(user.ID, rh.Value, h.cfg.JWTSecret)
+			if err == nil {
+				scheme := "https"
+				if !h.cfg.IsProd() {
+					scheme = "http"
+				}
+				return c.Redirect(http.StatusFound, scheme+"://"+rh.Value+"/api/v1/sso_handoff?token="+tok)
+			}
+		}
+	}
 	return c.Redirect(http.StatusFound, "/dashboard")
+}
+
+// ssoHandoff is the cross-host counterpart to oauthCallback: it lands on a
+// service domain after SSO completed on torii, exchanges the signed handoff
+// token for a fresh session on this host (cookies are per-host so the torii
+// session can't be seen here), and redirects to the originally requested
+// path. The token is bound to this host and expires in 30s.
+func (h *authHandlers) ssoHandoff(c *echo.Context) error {
+	tok := c.QueryParam("token")
+	if tok == "" {
+		return c.Redirect(http.StatusFound, "/signin?error=handoff")
+	}
+	claims, err := auth.ParseHandoffToken(tok, h.cfg.JWTSecret)
+	if err != nil {
+		return c.Redirect(http.StatusFound, "/signin?error=handoff")
+	}
+	if !sameNormalizedHost(claims.TargetHost, c.Request().Host) {
+		return c.Redirect(http.StatusFound, "/signin?error=handoff")
+	}
+	uid, err := uuid.Parse(claims.Subject)
+	if err != nil {
+		return c.Redirect(http.StatusFound, "/signin?error=handoff")
+	}
+	user, err := h.q.GetUserByID(c.Request().Context(), uid)
+	if err != nil {
+		return c.Redirect(http.StatusFound, "/signin?error=handoff")
+	}
+	if _, _, _, err := h.issueSession(c.Request().Context(), c, user); err != nil {
+		return c.Redirect(http.StatusFound, "/signin?error=handoff")
+	}
+	return c.Redirect(http.StatusFound, "/")
+}
+
+func sameNormalizedHost(a, b string) bool {
+	return strings.EqualFold(strings.TrimSuffix(strings.TrimSuffix(a, ":443"), ":80"),
+		strings.TrimSuffix(strings.TrimSuffix(b, ":443"), ":80"))
 }
 
 func (h *authHandlers) findOrCreateSSOUser(ctx context.Context, p db.SsoProvider, claims oidcUserClaims, email string) (db.User, string, error) {

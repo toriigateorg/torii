@@ -46,7 +46,11 @@ export function useAuth() {
 
   function scheduleRefresh(expiresIn: number) {
     clearRefreshTimer()
-    const ms = Math.max(5_000, (expiresIn - 30) * 1000)
+    // Refresh 15s before expiry, but never sooner than 5s and never later
+    // than half the TTL — keeps silent refreshes cheap on long-TTL prod
+    // configs while still working on the 60s short-TTL default.
+    const lead = expiresIn <= 60 ? 15 : 30
+    const ms = Math.max(5_000, Math.min((expiresIn / 2) * 1000, (expiresIn - lead) * 1000))
     refreshTimer = setTimeout(() => {
       void refresh().catch(() => {})
     }, ms)
