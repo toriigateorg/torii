@@ -4,7 +4,7 @@ services:
     build:
       context: ./
       dockerfile: Dockerfile
-    image: torii:latest
+    image: codingcoffee/torii:latest
     ports:
       - "1356:1356"
     depends_on:
@@ -16,7 +16,7 @@ services:
       APP_ENV: production
       AUDIT_LOG_DIR: /app/logs
     volumes:
-      - audit-logs:/app/logs
+      - ./audit-logs:/app/logs
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:1356/api/v1/health"]
       interval: 30s
@@ -28,7 +28,7 @@ services:
     image: postgres:18.3-alpine3.23
     restart: unless-stopped
     volumes:
-      - postgres-data:/var/lib/postgresql/18/docker
+      - ./postgres-data:/var/lib/postgresql/18/docker
     env_file:
       - .postgres.env
     healthcheck:
@@ -36,7 +36,3 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-
-volumes:
-  postgres-data:
-  audit-logs:
