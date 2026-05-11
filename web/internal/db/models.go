@@ -79,6 +79,7 @@ type Service struct {
 	CreatedAt     pgtype.Timestamptz
 	UpdatedAt     pgtype.Timestamptz
 	SigningSecret []byte
+	PreserveHost  bool
 }
 
 type SsoProvider struct {

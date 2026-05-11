@@ -28,6 +28,7 @@ const form = ref<ServicePayload>({
   service_url: "",
   domain: "",
   headers: {},
+  preserve_host: false,
 })
 const headerRows = ref<HeaderRow[]>([])
 
@@ -55,7 +56,7 @@ watch(page, load)
 onMounted(load)
 
 function resetForm() {
-  form.value = { title: "", description: "", service_url: "", domain: "", headers: {} }
+  form.value = { title: "", description: "", service_url: "", domain: "", headers: {}, preserve_host: false }
   headerRows.value = []
   formError.value = null
   editTargetId.value = null
@@ -76,6 +77,7 @@ function openEdit(svc: Service) {
     service_url: svc.service_url,
     domain: svc.domain,
     headers: { ...svc.headers },
+    preserve_host: svc.preserve_host,
   }
   headerRows.value = Object.entries(svc.headers).map(([key, value]) => ({ key, value }))
   formError.value = null
@@ -127,6 +129,7 @@ async function submit() {
       service_url: form.value.service_url.trim(),
       domain: form.value.domain.trim().toLowerCase(),
       headers: collectHeaders(),
+      preserve_host: form.value.preserve_host,
     }
     if (formMode.value === "create") {
       await api.createService(payload)
@@ -296,6 +299,23 @@ async function confirmDelete() {
               >
                 <X class="size-4" aria-hidden="true" />
               </Button>
+            </div>
+          </div>
+
+          <div class="flex items-start gap-3 hairline rounded-md p-3 bg-muted/20">
+            <Checkbox
+              id="svc-preserve-host"
+              :model-value="form.preserve_host"
+              @update:model-value="(v) => (form.preserve_host = v === true)"
+            />
+            <div class="flex flex-col gap-0.5 -mt-0.5">
+              <Label for="svc-preserve-host" class="cursor-pointer">Preserve Host header</Label>
+              <p class="text-xs text-muted-foreground leading-relaxed">
+                Forward the client's original
+                <span class="font-mono">Host</span> header to the upstream. Enable for apps like
+                Streamlit that build redirects from <span class="font-mono">Host</span>; leave off
+                for vhost-based upstreams.
+              </p>
             </div>
           </div>
 

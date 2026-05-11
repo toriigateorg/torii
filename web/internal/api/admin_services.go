@@ -52,14 +52,15 @@ func validateHeaderOverlay(headers map[string]string) string {
 }
 
 type serviceDTO struct {
-	ID          string            `json:"id"`
-	Title       string            `json:"title"`
-	Description string            `json:"description"`
-	ServiceURL  string            `json:"service_url"`
-	Domain      string            `json:"domain"`
-	Headers     map[string]string `json:"headers"`
-	CreatedAt   string            `json:"created_at"`
-	UpdatedAt   string            `json:"updated_at"`
+	ID           string            `json:"id"`
+	Title        string            `json:"title"`
+	Description  string            `json:"description"`
+	ServiceURL   string            `json:"service_url"`
+	Domain       string            `json:"domain"`
+	Headers      map[string]string `json:"headers"`
+	PreserveHost bool              `json:"preserve_host"`
+	CreatedAt    string            `json:"created_at"`
+	UpdatedAt    string            `json:"updated_at"`
 }
 
 type adminServiceListResp struct {
@@ -68,11 +69,12 @@ type adminServiceListResp struct {
 }
 
 type adminServiceReq struct {
-	Title       string            `json:"title"`
-	Description string            `json:"description"`
-	ServiceURL  string            `json:"service_url"`
-	Domain      string            `json:"domain"`
-	Headers     map[string]string `json:"headers"`
+	Title        string            `json:"title"`
+	Description  string            `json:"description"`
+	ServiceURL   string            `json:"service_url"`
+	Domain       string            `json:"domain"`
+	Headers      map[string]string `json:"headers"`
+	PreserveHost bool              `json:"preserve_host"`
 }
 
 func toServiceDTO(s db.Service) serviceDTO {
@@ -81,14 +83,15 @@ func toServiceDTO(s db.Service) serviceDTO {
 		_ = json.Unmarshal(s.Headers, &headers)
 	}
 	return serviceDTO{
-		ID:          s.ID.String(),
-		Title:       s.Title,
-		Description: s.Description,
-		ServiceURL:  s.ServiceUrl,
-		Domain:      s.Domain,
-		Headers:     headers,
-		CreatedAt:   tsString(s.CreatedAt),
-		UpdatedAt:   tsString(s.UpdatedAt),
+		ID:           s.ID.String(),
+		Title:        s.Title,
+		Description:  s.Description,
+		ServiceURL:   s.ServiceUrl,
+		Domain:       s.Domain,
+		Headers:      headers,
+		PreserveHost: s.PreserveHost,
+		CreatedAt:    tsString(s.CreatedAt),
+		UpdatedAt:    tsString(s.UpdatedAt),
 	}
 }
 
@@ -167,11 +170,12 @@ func (h *authHandlers) adminCreateService(c *echo.Context) error {
 	}
 
 	svc, err := h.q.CreateService(c.Request().Context(), db.CreateServiceParams{
-		Title:       req.Title,
-		Description: req.Description,
-		ServiceUrl:  req.ServiceURL,
-		Domain:      req.Domain,
-		Headers:     headers,
+		Title:        req.Title,
+		Description:  req.Description,
+		ServiceUrl:   req.ServiceURL,
+		Domain:       req.Domain,
+		Headers:      headers,
+		PreserveHost: req.PreserveHost,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -211,12 +215,13 @@ func (h *authHandlers) adminUpdateService(c *echo.Context) error {
 	ctx := c.Request().Context()
 	prev, _ := h.q.GetServiceByID(ctx, id)
 	svc, err := h.q.UpdateService(ctx, db.UpdateServiceParams{
-		ID:          id,
-		Title:       req.Title,
-		Description: req.Description,
-		ServiceUrl:  req.ServiceURL,
-		Domain:      req.Domain,
-		Headers:     headers,
+		ID:           id,
+		Title:        req.Title,
+		Description:  req.Description,
+		ServiceUrl:   req.ServiceURL,
+		Domain:       req.Domain,
+		Headers:      headers,
+		PreserveHost: req.PreserveHost,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError

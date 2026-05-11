@@ -53,7 +53,13 @@ func ProxyTo(svc *CachedService, ident Identity, c *echo.Context) error {
 	originalDirector := rp.Director
 	rp.Director = func(req *http.Request) {
 		originalDirector(req)
-		req.Host = svc.Target.Host
+		// By default rewrite Host to the upstream so vhost-based servers and
+		// SNI work. Per-service opt-in (preserve_host) keeps the client's
+		// Host so apps like Streamlit build correct same-origin redirects
+		// instead of pointing back at their internal address.
+		if !svc.PreserveHost {
+			req.Host = svc.Target.Host
+		}
 
 		// Surface the original client-facing host/proto to the upstream so it
 		// can build correct absolute URLs and redirects. X-Forwarded-For is

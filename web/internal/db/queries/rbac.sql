@@ -121,6 +121,7 @@ SELECT
     s.domain,
     s.headers,
     s.signing_secret,
+    s.preserve_host,
     s.created_at,
     s.updated_at,
     COALESCE(

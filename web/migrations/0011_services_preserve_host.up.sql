@@ -1,0 +1,2 @@
+ALTER TABLE services
+    ADD COLUMN preserve_host BOOLEAN NOT NULL DEFAULT FALSE;

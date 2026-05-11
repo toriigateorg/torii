@@ -21,6 +21,7 @@ type CachedService struct {
 	Target        *url.URL
 	Headers       map[string]string
 	SigningSecret []byte
+	PreserveHost  bool
 	RoleIDs       map[uuid.UUID]struct{}
 }
 
@@ -114,6 +115,7 @@ func (c *ServiceCache) refreshLocked(ctx context.Context) {
 			Target:        target,
 			Headers:       headers,
 			SigningSecret: r.SigningSecret,
+			PreserveHost:  r.PreserveHost,
 			RoleIDs:       roleSet,
 		}
 	}

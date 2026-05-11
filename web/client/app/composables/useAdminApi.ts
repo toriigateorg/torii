@@ -43,6 +43,7 @@ export interface Service {
   service_url: string
   domain: string
   headers: Record<string, string>
+  preserve_host: boolean
   created_at: string
   updated_at: string
 }
@@ -57,6 +58,7 @@ export interface ServicePayload {
   service_url: string
   domain: string
   headers: Record<string, string>
+  preserve_host: boolean
 }
 
 export interface Role {
