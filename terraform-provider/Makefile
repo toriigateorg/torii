@@ -1,6 +1,6 @@
 BINARY  := terraform-provider-torii
 VERSION := dev
-INSTALL_DIR := $(HOME)/.terraform.d/plugins/registry.terraform.io/torii/torii/$(VERSION)/$(shell go env GOOS)_$(shell go env GOARCH)
+INSTALL_DIR := $(HOME)/.terraform.d/plugins/registry.terraform.io/toriigateorg/torii/$(VERSION)/$(shell go env GOOS)_$(shell go env GOARCH)
 
 .PHONY: build install fmt vet tidy
 

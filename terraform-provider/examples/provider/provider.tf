@@ -1,7 +1,7 @@
 terraform {
   required_providers {
     torii = {
-      source = "torii/torii"
+      source = "toriigateorg/torii"
     }
   }
 }
