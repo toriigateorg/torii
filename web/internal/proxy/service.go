@@ -106,7 +106,15 @@ func ProxyTo(svc *CachedService, ident Identity, c *echo.Context) error {
 			req.Header.Set(k, v)
 		}
 	}
-	rp.ModifyResponse = injectOverlay
+	rp.ModifyResponse = func(resp *http.Response) error {
+		if resp.StatusCode >= 500 {
+			return replaceWithUpstreamError(resp)
+		}
+		return injectOverlay(resp)
+	}
+	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, _ error) {
+		renderUpstreamError(w, r, http.StatusBadGateway)
+	}
 	rp.ServeHTTP(c.Response(), c.Request())
 	return nil
 }
