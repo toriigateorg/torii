@@ -42,11 +42,26 @@ var stripIdentityHeaders = []string{
 // identity headers describing the caller, and applies the per-service header
 // overlay last.
 func ProxyTo(svc *CachedService, ident Identity, c *echo.Context) error {
+	inbound := c.Request()
+	origHost := inbound.Host
+	origProto := "http"
+	if inbound.TLS != nil || strings.EqualFold(inbound.Header.Get("X-Forwarded-Proto"), "https") {
+		origProto = "https"
+	}
+
 	rp := httputil.NewSingleHostReverseProxy(svc.Target)
 	originalDirector := rp.Director
 	rp.Director = func(req *http.Request) {
 		originalDirector(req)
 		req.Host = svc.Target.Host
+
+		// Surface the original client-facing host/proto to the upstream so it
+		// can build correct absolute URLs and redirects. X-Forwarded-For is
+		// already appended by httputil.ReverseProxy.
+		if origHost != "" {
+			req.Header.Set("X-Forwarded-Host", origHost)
+		}
+		req.Header.Set("X-Forwarded-Proto", origProto)
 
 		// Disable upstream compression so we can splice the torii overlay
 		// into HTML responses without having to decode gzip/br.
