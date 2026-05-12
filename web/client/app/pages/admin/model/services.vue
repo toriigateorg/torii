@@ -1,6 +1,11 @@
 <script setup lang="ts">
-import { Plus, Trash2, Pencil, X } from "lucide-vue-next"
-import type { Service, ServicePayload } from "~/composables/useAdminApi"
+import { Plus, Trash2, Pencil, X, RefreshCw } from "lucide-vue-next"
+import type { Service, ServicePayload, ServiceHealth } from "~/composables/useAdminApi"
+
+interface HealthState {
+  status: "idle" | "checking" | "done"
+  result?: ServiceHealth
+}
 
 definePageMeta({ middleware: ["auth", "admin"] })
 useSeoMeta({ title: "Admin · Services — torii", robots: "noindex, nofollow" })
@@ -35,6 +40,29 @@ const headerRows = ref<HeaderRow[]>([])
 const deleteTarget = ref<Service | null>(null)
 const deleting = ref(false)
 
+const health = ref<Record<string, HealthState>>({})
+
+async function checkHealth(id: string) {
+  health.value = { ...health.value, [id]: { status: "checking" } }
+  try {
+    const result = await api.checkServiceHealth(id)
+    health.value = { ...health.value, [id]: { status: "done", result } }
+  } catch (e: unknown) {
+    const err = e as { data?: { error?: string }; message?: string }
+    health.value = {
+      ...health.value,
+      [id]: {
+        status: "done",
+        result: { ok: false, latency_ms: 0, error: err?.data?.error ?? err?.message ?? "check failed" },
+      },
+    }
+  }
+}
+
+function checkAll() {
+  for (const s of items.value) void checkHealth(s.id)
+}
+
 const domainRe = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[0-9]+)?$/
 
 async function load() {
@@ -44,6 +72,8 @@ async function load() {
     const res = await api.listServices(page.value, pageSize.value)
     items.value = res.items
     total.value = res.total
+    health.value = {}
+    checkAll()
   } catch (e: unknown) {
     const err = e as { data?: { error?: string }; message?: string }
     error.value = err?.data?.error ?? err?.message ?? "Failed to load services"
@@ -170,9 +200,19 @@ async function confirmDelete() {
         <p class="text-mono-label">// services</p>
         <h2 class="text-xl font-semibold tracking-tight mt-1">All services</h2>
       </div>
-      <Button class="h-9" @click="openCreate">
-        <Plus class="size-4 mr-1.5" aria-hidden="true" /> Create service
-      </Button>
+      <div class="flex items-center gap-2">
+        <Button
+          variant="outline"
+          class="h-9"
+          :disabled="!items.length"
+          @click="checkAll"
+        >
+          <RefreshCw class="size-4 mr-1.5" aria-hidden="true" /> Recheck all
+        </Button>
+        <Button class="h-9" @click="openCreate">
+          <Plus class="size-4 mr-1.5" aria-hidden="true" /> Create service
+        </Button>
+      </div>
     </div>
 
     <Alert v-if="error" variant="destructive" class="mb-4">
@@ -188,17 +228,18 @@ async function confirmDelete() {
             <TableHead>Domain</TableHead>
             <TableHead>Service URL</TableHead>
             <TableHead>Headers</TableHead>
+            <TableHead>Status</TableHead>
             <TableHead class="text-right">Actions</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           <TableRow v-if="loading && !items.length">
-            <TableCell colspan="5" class="text-center py-12 text-muted-foreground font-mono text-xs">
+            <TableCell colspan="6" class="text-center py-12 text-muted-foreground font-mono text-xs">
               <span role="status">loading…</span>
             </TableCell>
           </TableRow>
           <TableRow v-else-if="!items.length">
-            <TableCell colspan="5" class="text-center py-12 text-muted-foreground font-mono text-xs">
+            <TableCell colspan="6" class="text-center py-12 text-muted-foreground font-mono text-xs">
               no services
             </TableCell>
           </TableRow>
@@ -211,6 +252,48 @@ async function confirmDelete() {
             <TableCell class="font-mono text-xs break-all">{{ s.service_url }}</TableCell>
             <TableCell>
               <Badge variant="secondary">{{ Object.keys(s.headers).length }}</Badge>
+            </TableCell>
+            <TableCell>
+              <div class="flex items-center gap-2">
+                <template v-if="!health[s.id] || health[s.id]?.status === 'checking'">
+                  <span
+                    class="inline-block size-2 rounded-full bg-muted-foreground/40 animate-pulse"
+                    aria-hidden="true"
+                  />
+                  <span class="text-xs font-mono text-muted-foreground">checking…</span>
+                </template>
+                <template v-else-if="health[s.id]?.result?.ok">
+                  <span class="inline-block size-2 rounded-full bg-emerald-500" aria-hidden="true" />
+                  <span class="text-xs font-mono text-muted-foreground">
+                    {{ health[s.id]?.result?.status }} · {{ health[s.id]?.result?.latency_ms }}ms
+                  </span>
+                </template>
+                <template v-else>
+                  <span class="inline-block size-2 rounded-full bg-destructive" aria-hidden="true" />
+                  <span
+                    class="text-xs font-mono text-muted-foreground truncate max-w-[16ch]"
+                    :title="health[s.id]?.result?.error || `HTTP ${health[s.id]?.result?.status}`"
+                  >
+                    {{ health[s.id]?.result?.status
+                      ? `HTTP ${health[s.id]?.result?.status}`
+                      : (health[s.id]?.result?.error || "down") }}
+                  </span>
+                </template>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="size-7 ml-auto"
+                  :disabled="health[s.id]?.status === 'checking'"
+                  :aria-label="`Recheck ${s.title}`"
+                  @click="checkHealth(s.id)"
+                >
+                  <RefreshCw
+                    class="size-3.5"
+                    :class="{ 'animate-spin': health[s.id]?.status === 'checking' }"
+                    aria-hidden="true"
+                  />
+                </Button>
+              </div>
             </TableCell>
             <TableCell class="text-right">
               <Button

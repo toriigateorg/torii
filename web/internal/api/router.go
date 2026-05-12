@@ -150,6 +150,7 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	v1.PATCH("/admin/services/:id", h.adminUpdateService, gate(auth.PermServicesUpdate))
 	v1.DELETE("/admin/services/:id", h.adminDeleteService, gate(auth.PermServicesDelete))
 	v1.POST("/admin/services/:id/rotate_signing_secret", h.adminRotateServiceSigningSecret, gate(auth.PermServicesUpdate))
+	v1.GET("/admin/services/:id/health", h.adminCheckServiceHealth, gate(auth.PermServicesRead))
 
 	v1.GET("/admin/roles", h.adminListRoles, gate(auth.PermRolesRead))
 	v1.POST("/admin/roles", h.adminCreateRole, gate(auth.PermRolesCreate))

@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -9,6 +11,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -279,6 +282,74 @@ func (h *authHandlers) adminRotateServiceSigningSecret(c *echo.Context) error {
 	})
 	return c.JSON(http.StatusOK, map[string]string{
 		"signing_secret": base64.StdEncoding.EncodeToString(secret),
+	})
+}
+
+// healthCheckClient is a singleton with a short timeout, no redirect
+// following, and TLS verification skipped. Skipping verification matches the
+// proxy path's behavior toward upstreams (operators legitimately point torii
+// at LAN services with self-signed certs); the goal here is reachability, not
+// trust.
+var healthCheckClient = &http.Client{
+	Timeout: 3 * time.Second,
+	Transport: &http.Transport{
+		TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
+		ResponseHeaderTimeout: 3 * time.Second,
+		DisableKeepAlives:     true,
+	},
+	CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
+
+type serviceHealthResp struct {
+	OK        bool   `json:"ok"`
+	Status    int    `json:"status,omitempty"`
+	LatencyMS int64  `json:"latency_ms"`
+	Error     string `json:"error,omitempty"`
+}
+
+func (h *authHandlers) adminCheckServiceHealth(c *echo.Context) error {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid id"})
+	}
+	svc, err := h.q.GetServiceByID(c.Request().Context(), id)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "service not found"})
+	}
+
+	// Re-validate against SSRF guard at probe time: the safe-host check at
+	// create/update may have allowed a hostname that now resolves to a
+	// private IP, and we don't want the healthcheck to become an internal
+	// network scanner via DNS rebinding.
+	u, err := url.Parse(svc.ServiceUrl)
+	if err != nil || u.Host == "" {
+		return c.JSON(http.StatusOK, serviceHealthResp{OK: false, Error: "invalid service_url"})
+	}
+	if err := netutil.IsSafeUpstreamHost(u.Host, h.cfg.BlockLoopbackUpstreams); err != nil {
+		return c.JSON(http.StatusOK, serviceHealthResp{OK: false, Error: err.Error()})
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 3*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, svc.ServiceUrl, nil)
+	if err != nil {
+		return c.JSON(http.StatusOK, serviceHealthResp{OK: false, Error: err.Error()})
+	}
+	req.Header.Set("User-Agent", "torii-healthcheck/1")
+
+	start := time.Now()
+	resp, err := healthCheckClient.Do(req)
+	latency := time.Since(start).Milliseconds()
+	if err != nil {
+		return c.JSON(http.StatusOK, serviceHealthResp{OK: false, LatencyMS: latency, Error: err.Error()})
+	}
+	defer resp.Body.Close()
+	return c.JSON(http.StatusOK, serviceHealthResp{
+		OK:        resp.StatusCode < 500,
+		Status:    resp.StatusCode,
+		LatencyMS: latency,
 	})
 }
 

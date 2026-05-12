@@ -52,6 +52,13 @@ export interface ServiceListResponse extends PageMeta {
   items: Service[]
 }
 
+export interface ServiceHealth {
+  ok: boolean
+  status?: number
+  latency_ms: number
+  error?: string
+}
+
 export interface ServicePayload {
   title: string
   description: string
@@ -289,6 +296,9 @@ export function useAdminApi() {
         ...opts(),
         method: "DELETE",
       })
+    },
+    checkServiceHealth(id: string) {
+      return $fetch<ServiceHealth>(`/api/v1/admin/services/${id}/health`, opts())
     },
     listRoles(page: number, pageSize = 20) {
       return $fetch<RoleListResponse>("/api/v1/admin/roles", {
