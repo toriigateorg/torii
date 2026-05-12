@@ -42,10 +42,7 @@ RUN apk add --no-cache ca-certificates tzdata \
 
 WORKDIR /app
 
-# Migrations are read from disk (file://migrations) by `migrate up`, so they
-# need to ship inside the runtime image even though the SPA is embedded.
 COPY --from=server /out/torii /usr/local/bin/torii
-COPY migrations /app/migrations
 
 RUN mkdir -p /app/logs && chown torii:torii /app/logs
 

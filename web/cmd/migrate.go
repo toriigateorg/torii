@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"sort"
 	"strconv"
@@ -11,13 +12,10 @@ import (
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/urfave/cli/v3"
-)
 
-const (
-	migrationsDir = "migrations"
-	sourceURL     = "file://migrations"
+	"torii/migrations"
 )
 
 func Migrate() *cli.Command {
@@ -50,7 +48,11 @@ func openMigrate() (*migrate.Migrate, error) {
 	if dbURL == "" {
 		return nil, errors.New("DATABASE_URL is not set")
 	}
-	m, err := migrate.New(sourceURL, dbURL)
+	src, err := iofs.New(migrations.FS(), ".")
+	if err != nil {
+		return nil, fmt.Errorf("opening embedded migration source: %w", err)
+	}
+	m, err := migrate.NewWithSourceInstance("iofs", src, dbURL)
 	if err != nil {
 		return nil, fmt.Errorf("opening migrate: %w", err)
 	}
@@ -58,11 +60,11 @@ func openMigrate() (*migrate.Migrate, error) {
 }
 
 // migrationVersions returns all .up.sql migration versions sorted ascending,
-// parsed from the migrations/ directory (e.g. "0001_init.up.sql" -> 1).
+// parsed from the embedded migrations FS (e.g. "0001_init.up.sql" -> 1).
 func migrationVersions() ([]uint, error) {
-	entries, err := os.ReadDir(migrationsDir)
+	entries, err := fs.ReadDir(migrations.FS(), ".")
 	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", migrationsDir, err)
+		return nil, fmt.Errorf("reading embedded migrations: %w", err)
 	}
 	var versions []uint
 	for _, e := range entries {
@@ -200,4 +202,3 @@ func closeMigrate(m *migrate.Migrate) {
 		fmt.Fprintln(os.Stderr, "migrate db close:", dbErr)
 	}
 }
-
