@@ -186,7 +186,11 @@ func runInner(ctx context.Context, host string, port int) error {
 		if !web.HasAssets() {
 			fmt.Fprintln(os.Stderr, "[web] WARNING: embedded SPA is empty — build the client (bun run generate) and copy client/.output/public/* into internal/web/dist/ before `go build`")
 		}
-		spaHandler = web.Handler()
+		toriiURL := ""
+		if cfg != nil {
+			toriiURL = cfg.ToriiURL
+		}
+		spaHandler = web.Handler(toriiURL)
 	} else {
 		spaHandler = proxy.Nuxt()
 		go waitForNuxt("127.0.0.1:3000", 10*time.Second)

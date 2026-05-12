@@ -4,8 +4,11 @@
 package web
 
 import (
+	"bytes"
 	"embed"
+	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"net/http"
 	"strings"
@@ -30,18 +33,99 @@ func HasAssets() bool {
 // Handler returns an echo handler that serves the embedded Nuxt SPA, falling
 // back to index.html for any unknown path so Vue Router / Nuxt route handling
 // still works on hard reload.
-func Handler() echo.HandlerFunc {
+//
+// toriiURL is injected into every served HTML document as
+// `window.__TORII_URL__`, so the SPA can resolve the operator-configured torii
+// host at runtime instead of having it baked in at `nuxt generate` time. This
+// is what lets the domain-gate middleware know which Host to treat as "the
+// torii UI" vs. an unknown / service domain that should bounce to /signin.
+func Handler(toriiURL string) echo.HandlerFunc {
 	sub, err := fs.Sub(distRoot, "dist")
 	if err != nil {
 		return func(c *echo.Context) error {
 			return c.String(http.StatusInternalServerError, "embedded assets unavailable")
 		}
 	}
+	injection := buildInjection(toriiURL)
 	fileServer := http.FileServer(http.FS(spaFS{sub}))
 	return func(c *echo.Context) error {
-		fileServer.ServeHTTP(c.Response(), c.Request())
+		rw := &htmlInjector{ResponseWriter: c.Response(), inject: injection}
+		fileServer.ServeHTTP(rw, c.Request())
+		return rw.flush()
+	}
+}
+
+func buildInjection(toriiURL string) []byte {
+	encoded, _ := json.Marshal(toriiURL)
+	return []byte("<script>window.__TORII_URL__=" + string(encoded) + "</script>")
+}
+
+// htmlInjector buffers the upstream FileServer response so we can splice a
+// runtime-config <script> into the <head> of HTML documents without touching
+// other assets. We commit the response untouched (passthrough) as soon as we
+// determine the Content-Type is not HTML, so JS/CSS/font streams aren't held
+// in memory.
+type htmlInjector struct {
+	http.ResponseWriter
+	inject      []byte
+	status      int
+	wroteHeader bool
+	passthrough bool
+	buf         bytes.Buffer
+	flushErr    error
+}
+
+func (h *htmlInjector) WriteHeader(code int) {
+	if h.wroteHeader {
+		return
+	}
+	h.status = code
+	h.wroteHeader = true
+	ct := h.ResponseWriter.Header().Get("Content-Type")
+	if !strings.HasPrefix(ct, "text/html") {
+		h.passthrough = true
+		h.ResponseWriter.WriteHeader(code)
+		return
+	}
+	// We're going to mutate the body length; drop any precomputed
+	// Content-Length so the runtime sets the right one (or chunks).
+	h.ResponseWriter.Header().Del("Content-Length")
+}
+
+func (h *htmlInjector) Write(p []byte) (int, error) {
+	if !h.wroteHeader {
+		h.WriteHeader(http.StatusOK)
+	}
+	if h.passthrough {
+		return h.ResponseWriter.Write(p)
+	}
+	return h.buf.Write(p)
+}
+
+func (h *htmlInjector) flush() error {
+	if h.flushErr != nil {
+		return h.flushErr
+	}
+	if h.passthrough {
 		return nil
 	}
+	if !h.wroteHeader {
+		// FileServer never wrote anything (e.g. it called ServeContent which
+		// short-circuited via 304). Nothing to inject.
+		return nil
+	}
+	body := h.buf.Bytes()
+	if idx := bytes.Index(body, []byte("</head>")); idx >= 0 {
+		out := make([]byte, 0, len(body)+len(h.inject))
+		out = append(out, body[:idx]...)
+		out = append(out, h.inject...)
+		out = append(out, body[idx:]...)
+		body = out
+	}
+	h.ResponseWriter.WriteHeader(h.status)
+	_, err := io.Copy(h.ResponseWriter, bytes.NewReader(body))
+	h.flushErr = err
+	return err
 }
 
 // spaFS wraps an fs.FS so that requests for missing paths fall back to
