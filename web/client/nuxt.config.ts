@@ -30,6 +30,15 @@ export default defineNuxtConfig({
         { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" },
         { name: "theme-color", content: "#c8392c" },
         { name: "format-detection", content: "telephone=no" },
+        // Defaults; per-page useSeoMeta() can override.
+        { property: "og:image", content: `${(process.env.SITE_URL ?? "https://toriigate.org").replace(/\/$/, "")}/og-image.png` },
+        { property: "og:image:width", content: "1200" },
+        { property: "og:image:height", content: "630" },
+        { property: "og:image:type", content: "image/png" },
+        { property: "og:image:alt", content: "torii — identity-aware reverse proxy" },
+        { name: "twitter:card", content: "summary_large_image" },
+        { name: "twitter:image", content: `${(process.env.SITE_URL ?? "https://toriigate.org").replace(/\/$/, "")}/og-image.png` },
+        { name: "twitter:image:alt", content: "torii — identity-aware reverse proxy" },
       ],
       link: [
         { rel: "icon", type: "image/svg+xml", href: "/torii-logo.svg" },

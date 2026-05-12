@@ -12,13 +12,24 @@ import {
   ChevronRight,
 } from "lucide-vue-next"
 
+const siteUrl = useRuntimeConfig().public.siteUrl as string
+const ogImage = `${siteUrl.replace(/\/$/, "")}/og-image.png`
+
 useSeoMeta({
   title: "torii — identity-aware reverse proxy",
   description: "Open-source zero trust gateway. Self-host a single Go binary at your edge for SSO, RBAC, and HTTP-aware reverse proxying — no SDK rewrites in your services.",
   ogTitle: "torii — identity-aware reverse proxy",
   ogDescription: "Open-source zero trust gateway. Self-host SSO, RBAC, and reverse proxy as one Go binary.",
+  ogImage,
+  ogImageWidth: 1200,
+  ogImageHeight: 630,
+  ogImageType: "image/png",
+  ogImageAlt: "torii — identity-aware reverse proxy",
   twitterTitle: "torii — identity-aware reverse proxy",
   twitterDescription: "Open-source zero trust gateway. Self-host SSO, RBAC, and reverse proxy as one Go binary.",
+  twitterCard: "summary_large_image",
+  twitterImage: ogImage,
+  twitterImageAlt: "torii — identity-aware reverse proxy",
 })
 
 useHead({
