@@ -56,7 +56,7 @@ async function onSubmit() {
   loading.value = true
   try {
     await signin(identifier.value.trim(), password.value)
-    const expected = useRuntimeConfig().public.toriiUrl
+    const expected = useToriiUrl()
     if (expected && window.location.host !== expected) {
       window.location.assign("/")
       return

@@ -7,7 +7,7 @@
 export default defineNuxtRouteMiddleware((to) => {
   if (import.meta.server) return
 
-  const expected = useRuntimeConfig().public.toriiUrl
+  const expected = useToriiUrl()
   const here = window.location.host
   if (!expected || here === expected) return
 

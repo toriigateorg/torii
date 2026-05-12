@@ -75,7 +75,7 @@ client/                      Nuxt 4 SPA
 Dockerfile                   prod: bun build SPA → embed → static Go binary
 Dockerfile.dev               dev: golang + bun + air + sqlc, hot reload
 docker-compose.yml           dev (bind-mounts source, runs air)
-docker-compose.prod.yml      prod (named volume, healthcheck, APP_ENV=production)
+docker-compose.prod.yml      prod (bind-mounted ./audit-logs, healthcheck, APP_ENV=production)
 ```
 
 ## Auth model
@@ -107,7 +107,7 @@ docker-compose.prod.yml      prod (named volume, healthcheck, APP_ENV=production
 | `API_HOST` | `0.0.0.0` | |
 | `API_PORT` | `1356` | |
 | `TORII_URL` | *(required)* | host[:port] torii itself answers on. Requests with this `Host` header serve the SPA; other hosts go through the reverse-proxy. Dev value: `localhost:1356`. Also exposed to the SPA via `runtimeConfig.public.toriiUrl`. |
-| `AUDIT_LOG_DIR` | `./logs` | directory for the JSON-lines audit trail (`audit.jsonl`); auto-created. Mount a volume here in prod (compose mounts `audit-logs` → `/app/logs`). |
+| `AUDIT_LOG_DIR` | `./logs` | directory for the JSON-lines audit trail (`audit.jsonl`); auto-created. In prod, compose bind-mounts `./audit-logs` → `/app/logs`; the host dir must be owned by UID/GID 10001 (the container's `torii` user) — `mkdir -p ./audit-logs && sudo chown -R 10001:10001 ./audit-logs`. |
 | `SITE_URL` | `https://toriigate.org` | Public canonical URL baked into the SPA at build time (canonical link, `og:url`, sitemap). Read by `client/nuxt.config.ts` during `bun run generate`. Override at Docker build via `--build-arg SITE_URL=...`. Only affects prerendered HTML — runtime requests don't read it. |
 
 Loaded by `godotenv.Load()` in `server.go` from `.env`/`.app.env`.

@@ -38,7 +38,8 @@ RUN go build -trimpath -ldflags='-s -w' -o /out/torii .
 # ---------- Stage 3: minimal runtime ----------
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata \
-    && addgroup -S torii && adduser -S torii -G torii
+    && addgroup -g 10001 -S torii \
+    && adduser  -u 10001 -S torii -G torii
 
 WORKDIR /app
 

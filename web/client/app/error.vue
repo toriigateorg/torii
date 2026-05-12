@@ -39,7 +39,7 @@ const detail = computed(() => {
 })
 
 function goDashboard() {
-  const toriiHost = useRuntimeConfig().public.toriiUrl
+  const toriiHost = useToriiUrl()
   if (import.meta.client && toriiHost && window.location.host !== toriiHost) {
     window.location.assign(`${window.location.protocol}//${toriiHost}/dashboard`)
     return
@@ -47,7 +47,7 @@ function goDashboard() {
   clearError({ redirect: "/dashboard" })
 }
 function goHome() {
-  const toriiHost = useRuntimeConfig().public.toriiUrl
+  const toriiHost = useToriiUrl()
   if (import.meta.client && toriiHost && window.location.host !== toriiHost) {
     window.location.assign(`${window.location.protocol}//${toriiHost}/`)
     return
