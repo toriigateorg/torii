@@ -27,6 +27,19 @@ type SessionRefresher interface {
 // Register mounts the /_torii/api/v1 routes on the given echo instance and
 // returns a SessionRefresher (nil when no DB pool / config is wired).
 func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logger) SessionRefresher {
+	// Legacy OAuth callback shim. IdPs registered before the /_torii namespace
+	// move still POST/GET back to /api/v1/oauth/<slug>/callback; 302 them to
+	// the new path with the query string intact so the OAuth state/nonce
+	// cookies (Path=/_torii/api/v1/oauth/) ride along on the followup. To be
+	// removed within 2 releases — re-register IdP callbacks before then.
+	e.GET("/api/v1/oauth/:slug/callback", func(c *echo.Context) error {
+		target := "/_torii/api/v1/oauth/" + c.Param("slug") + "/callback"
+		if raw := c.Request().URL.RawQuery; raw != "" {
+			target += "?" + raw
+		}
+		return c.Redirect(http.StatusFound, target)
+	})
+
 	v1 := e.Group("/_torii/api/v1")
 
 	v1.GET("/health", func(c *echo.Context) error {
