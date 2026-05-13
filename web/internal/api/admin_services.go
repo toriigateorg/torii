@@ -339,6 +339,24 @@ func (h *authHandlers) adminCheckServiceHealth(c *echo.Context) error {
 	}
 	req.Header.Set("User-Agent", "torii-healthcheck/1")
 
+	// Apply the same per-service header overlay and host-preservation that
+	// the proxy path uses, so the healthcheck hits the same vhost / receives
+	// the same upstream-side routing as a real proxied request. Without
+	// this, multi-tenant upstreams (Frappe, Nginx vhosts, etc.) route the
+	// probe to whatever site corresponds to the upstream's host, not the
+	// torii-facing domain — making the probe answer for the wrong site.
+	if svc.PreserveHost {
+		req.Host = svc.Domain
+	}
+	if len(svc.Headers) > 0 {
+		var overlay map[string]string
+		if err := json.Unmarshal(svc.Headers, &overlay); err == nil {
+			for k, v := range overlay {
+				req.Header.Set(k, v)
+			}
+		}
+	}
+
 	start := time.Now()
 	resp, err := healthCheckClient.Do(req)
 	latency := time.Since(start).Milliseconds()
