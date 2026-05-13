@@ -374,7 +374,7 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logg
 		}
 		if cache != nil {
 			if svc, ok := cache.Lookup(c.Request().Context(), host); ok {
-				claims, err := auth.ClaimsFromRequest(c, cfg.JWTSecret)
+				claims, err := auth.ClaimsFromProxyRequest(c, cfg.JWTSecret)
 				// Access token expired on a proxied domain. The refresh
 				// cookie is path-scoped to /api/v1/ so it isn't sent on
 				// a request to "/" — we can't rotate inline. For top-

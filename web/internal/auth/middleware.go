@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/labstack/echo/v5"
@@ -55,6 +56,16 @@ func RequirePermission(secret []byte, perm string, onDenied func(c *echo.Context
 }
 
 func authenticate(c *echo.Context, secret []byte) (*Claims, error) {
+	return authenticateWith(c, secret, false)
+}
+
+// authenticateWith authenticates a request using the access cookie or a
+// Bearer token. When allowCookieIfSameOrigin is true, state-changing methods
+// may authenticate via the cookie if the request is provably same-origin —
+// used by the proxy dispatch so apps running on service domains can hit
+// their own login/write XHRs with just the host-scoped cookie. /api/v1/*
+// callers pass false and keep the strict Bearer-only rule.
+func authenticateWith(c *echo.Context, secret []byte, allowCookieIfSameOrigin bool) (*Claims, error) {
 	tok := bearerToken(c)
 	if tok == "" {
 		// CSRF defense: state-changing methods must carry a Bearer token.
@@ -65,7 +76,9 @@ func authenticate(c *echo.Context, secret []byte) (*Claims, error) {
 		// cookie is purely a hydration aid for the proxy dispatch on
 		// service domains (read-only navigations).
 		if isStateChanging(c.Request().Method) && !isCookieAllowedPath(c.Request().URL.Path) {
-			return nil, errMissingToken
+			if !(allowCookieIfSameOrigin && isSameOrigin(c.Request())) {
+				return nil, errMissingToken
+			}
 		}
 		if ck, err := c.Cookie(AccessCookie); err == nil {
 			tok = ck.Value
@@ -107,6 +120,41 @@ func ValidAccessToken(c *echo.Context, secret []byte) bool {
 
 func ClaimsFromRequest(c *echo.Context, secret []byte) (*Claims, error) {
 	return authenticate(c, secret)
+}
+
+// ClaimsFromProxyRequest is used by the reverse-proxy dispatch for requests
+// targeted at configured service domains. It accepts the access cookie on
+// state-changing methods provided the request is same-origin (Origin or
+// Referer host matches the request Host), so apps running on those domains
+// can authenticate their own XHRs without a Bearer header.
+func ClaimsFromProxyRequest(c *echo.Context, secret []byte) (*Claims, error) {
+	return authenticateWith(c, secret, true)
+}
+
+// isSameOrigin reports whether the request's Origin (or Referer, when Origin
+// is absent) refers to the same host as the request itself. Used to gate
+// cookie-based auth on state-changing requests to proxied service domains.
+// A cross-site attacker cannot forge either header from a page they control.
+func isSameOrigin(r *http.Request) bool {
+	host := r.Host
+	if host == "" {
+		return false
+	}
+	if o := r.Header.Get("Origin"); o != "" {
+		u, err := url.Parse(o)
+		if err != nil || u.Host == "" {
+			return false
+		}
+		return u.Host == host
+	}
+	if ref := r.Header.Get("Referer"); ref != "" {
+		u, err := url.Parse(ref)
+		if err != nil || u.Host == "" {
+			return false
+		}
+		return u.Host == host
+	}
+	return false
 }
 
 func ClaimsFrom(c *echo.Context) *Claims {
