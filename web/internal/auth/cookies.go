@@ -17,7 +17,13 @@ const (
 	// user is genuinely logged out and should fall through to the SPA.
 	SessionCookie = "torii_session"
 
-	refreshCookiePath = "/api/v1/"
+	// refreshCookiePath is "/" so the refresh cookie rides along on every
+	// request to the host — including XHRs to proxied service apps. This
+	// lets dispatch perform an inline session refresh on any request (not
+	// just document GETs we can 302 to /api/v1/refresh_and_redirect).
+	// httpOnly + SameSite=Lax + Secure (prod) keep it as safe at "/" as it
+	// was at "/api/v1/"; the threat model already trusts the host.
+	refreshCookiePath = "/"
 )
 
 func SetAccessCookie(c *echo.Context, token string, ttl time.Duration, secure bool) {

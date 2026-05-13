@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -375,19 +374,18 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logg
 		if cache != nil {
 			if svc, ok := cache.Lookup(c.Request().Context(), host); ok {
 				claims, err := auth.ClaimsFromProxyRequest(c, cfg.JWTSecret)
-				// Access token expired on a proxied domain. The refresh
-				// cookie is path-scoped to /api/v1/ so it isn't sent on
-				// a request to "/" — we can't rotate inline. For top-
-				// level document navigations we 302 the browser through
-				// /api/v1/refresh_and_redirect (where the cookie does
-				// ride along) and bounce back. Only do this when an
-				// access cookie is actually present: an absent cookie
-				// means the user is logged out, so falling through to
-				// the SPA is correct (avoids a redirect loop after
-				// logout, since the refresh handler would also fail).
-				if err != nil && refresher != nil && isDocumentRequest(c.Request()) && hasSessionMarker(c.Request()) {
-					to := c.Request().URL.RequestURI()
-					return c.Redirect(http.StatusFound, "/api/v1/refresh_and_redirect?to="+url.QueryEscape(to))
+				// Access token expired/missing on a proxied domain. The
+				// refresh cookie lives at Path=/ so it rides along on
+				// every request to this host — including XHRs — letting
+				// us rotate the session inline and proceed transparently.
+				// We only attempt this when the (non-secret) session
+				// marker is present: an absent marker means the user is
+				// genuinely logged out, so falling through to the SPA is
+				// correct (avoids hammering the refresh path after logout).
+				if err != nil && refresher != nil && hasSessionMarker(c.Request()) {
+					if refreshed, rerr := refresher.AttemptCookieRefresh(c); rerr == nil {
+						claims, err = refreshed, nil
+					}
 				}
 				if err != nil {
 					if auditor != nil {
