@@ -428,14 +428,14 @@ func (h *authHandlers) issueSession(ctx context.Context, c *echo.Context, user d
 }
 
 // refreshAndRedirect rotates the session using the refresh cookie and 302s
-// back to the caller-supplied `to` path. Lives at /api/v1/refresh_and_redirect
-// so the path-scoped refresh cookie actually rides along on the request — the
-// proxy dispatch redirects the browser here whenever an access token expires
-// on a proxied service domain.
+// back to the caller-supplied `to` path. Lives at
+// /_torii/api/v1/refresh_and_redirect so the path-scoped refresh cookie
+// actually rides along on the request — the proxy dispatch redirects the
+// browser here whenever an access token expires on a proxied service domain.
 func (h *authHandlers) refreshAndRedirect(c *echo.Context) error {
 	to := safeRelativeRedirect(c.QueryParam("to"))
 	if _, err := h.AttemptCookieRefresh(c); err != nil {
-		return c.Redirect(http.StatusFound, "/signin")
+		return c.Redirect(http.StatusFound, "/_torii/signin")
 	}
 	return c.Redirect(http.StatusFound, to)
 }

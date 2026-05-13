@@ -73,7 +73,7 @@ export function useAuth() {
     first_name?: string
     last_name?: string
   }) {
-    const data = await $fetch<TokenResponse>("/api/v1/signup", {
+    const data = await $fetch<TokenResponse>("/_torii/api/v1/signup", {
       method: "POST",
       body: payload,
       credentials: "include",
@@ -82,7 +82,7 @@ export function useAuth() {
   }
 
   async function signin(identifier: string, password: string) {
-    const data = await $fetch<TokenResponse>("/api/v1/signin", {
+    const data = await $fetch<TokenResponse>("/_torii/api/v1/signin", {
       method: "POST",
       body: { identifier, password },
       credentials: "include",
@@ -92,7 +92,7 @@ export function useAuth() {
 
   async function refresh() {
     try {
-      const data = await $fetch<TokenResponse>("/api/v1/token_refresh", {
+      const data = await $fetch<TokenResponse>("/_torii/api/v1/token_refresh", {
         method: "POST",
         credentials: "include",
       })
@@ -109,7 +109,7 @@ export function useAuth() {
   async function fetchMe() {
     if (!accessToken.value) return
     try {
-      user.value = await $fetch<AuthUser>("/api/v1/me", {
+      user.value = await $fetch<AuthUser>("/_torii/api/v1/me", {
         headers: authHeaders(),
         credentials: "include",
       })
@@ -120,7 +120,7 @@ export function useAuth() {
 
   async function signout() {
     try {
-      await $fetch("/api/v1/logout", {
+      await $fetch("/_torii/api/v1/logout", {
         method: "POST",
         credentials: "include",
       })

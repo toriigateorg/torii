@@ -21,6 +21,8 @@ export default defineNuxtRouteMiddleware((to) => {
     })
   }
 
+  // Vue Router strips app.baseURL from to.path, so the comparison is against
+  // the unprefixed route names even though the browser URL is /_torii/signin.
   if (to.path !== "/signin" && to.path !== "/signup") {
     return navigateTo("/signin", { replace: true })
   }

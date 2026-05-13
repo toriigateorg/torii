@@ -14,7 +14,7 @@ async function check() {
   loading.value = true
   error.value = null
   try {
-    data.value = await $fetch<HealthResponse>("/api/v1/ht/")
+    data.value = await $fetch<HealthResponse>("/_torii/api/v1/ht/")
     lastChecked.value = new Date()
   } catch (e: any) {
     error.value = e?.message ?? "request failed"
@@ -52,7 +52,7 @@ function timeAgo(d: Date | null) {
 
 <template>
   <div class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 py-16 sm:py-24">
-    <p class="text-mono-label mb-4">// /api/v1/ht/</p>
+    <p class="text-mono-label mb-4">// /_torii/api/v1/ht/</p>
     <h1 class="text-3xl sm:text-4xl font-semibold tracking-tight">System health</h1>
     <p class="mt-3 text-muted-foreground">
       Live state of the torii control plane and its dependencies.

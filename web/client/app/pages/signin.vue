@@ -39,7 +39,7 @@ onMounted(async () => {
     error.value = ssoErrorMessages[code]
   }
   try {
-    const cfg = await $fetch<{ providers: PublicProvider[]; signup_enabled: boolean }>("/api/v1/auth/config")
+    const cfg = await $fetch<{ providers: PublicProvider[]; signup_enabled: boolean }>("/_torii/api/v1/auth/config")
     providers.value = cfg.providers ?? []
     signupEnabled.value = cfg.signup_enabled
   } catch {
@@ -57,8 +57,12 @@ async function onSubmit() {
   try {
     await signin(identifier.value.trim(), password.value)
     const expected = useToriiUrl()
+    const route = useRoute()
+    const next = typeof route.query.next === "string" ? route.query.next : ""
     if (expected && window.location.host !== expected) {
-      window.location.assign("/")
+      // Service host: hard-load the original target (or "/") so the Go
+      // dispatch re-evaluates with the new cookies in place.
+      window.location.assign(next && next.startsWith("/") ? next : "/")
       return
     }
     await navigateTo("/dashboard")
@@ -71,7 +75,7 @@ async function onSubmit() {
 }
 
 function ssoSignin(slug: string) {
-  window.location.assign(`/api/v1/oauth/${slug}/start`)
+  window.location.assign(`/_torii/api/v1/oauth/${slug}/start`)
 }
 </script>
 

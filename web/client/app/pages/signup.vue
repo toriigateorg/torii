@@ -16,7 +16,7 @@ const configLoaded = ref(false)
 
 onMounted(async () => {
   try {
-    const cfg = await $fetch<{ signup_enabled: boolean }>("/api/v1/auth/config")
+    const cfg = await $fetch<{ signup_enabled: boolean }>("/_torii/api/v1/auth/config")
     signupEnabled.value = cfg.signup_enabled
   } catch {
     /* fall back to enabled; server still gates */

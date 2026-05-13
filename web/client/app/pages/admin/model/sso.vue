@@ -270,7 +270,7 @@ async function confirmDelete() {
           <DialogTitle>{{ formMode === "create" ? "Add SSO provider" : "Edit SSO provider" }}</DialogTitle>
           <DialogDescription>
             Any OIDC-compliant identity provider works (Google, Zitadel, Keycloak, Auth0, …).
-            The redirect URI is <span class="font-mono">https://&lt;host&gt;/api/v1/oauth/&lt;slug&gt;/callback</span>,
+            The redirect URI is <span class="font-mono">https://&lt;host&gt;/_torii/api/v1/oauth/&lt;slug&gt;/callback</span>,
             where <span class="font-mono">&lt;host&gt;</span> is whichever domain the user signs in from.
             Register a callback for every domain that fronts torii (the main UI plus each proxied service host).
           </DialogDescription>

@@ -29,7 +29,7 @@ const (
 	ssoStateCookie      = "sso_state"
 	ssoNonceCookie      = "sso_nonce"
 	ssoReturnHostCookie = "sso_return_host"
-	ssoCookiePath       = "/api/v1/oauth/"
+	ssoCookiePath       = "/_torii/api/v1/oauth/"
 	ssoCookieTTL        = 10 * time.Minute
 )
 
@@ -66,7 +66,7 @@ func (h *authHandlers) oauthRedirectURL(_ *echo.Context, slug string) string {
 	if !h.cfg.IsProd() {
 		scheme = "http"
 	}
-	return scheme + "://" + h.cfg.ToriiURL + "/api/v1/oauth/" + slug + "/callback"
+	return scheme + "://" + h.cfg.ToriiURL + "/_torii/api/v1/oauth/" + slug + "/callback"
 }
 
 func (h *authHandlers) oauth2Config(c *echo.Context, prov *oidc.Provider, p db.SsoProvider) *oauth2.Config {
@@ -200,19 +200,19 @@ func (h *authHandlers) oauthStart(c *echo.Context) error {
 
 	p, err := h.q.GetSSOProviderBySlug(ctx, slug)
 	if err != nil || !p.Enabled {
-		return c.Redirect(http.StatusFound, "/signin?error=sso_unknown")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_unknown")
 	}
 	prov, err := h.oidcProviderFor(ctx, p)
 	if err != nil {
-		return c.Redirect(http.StatusFound, "/signin?error=sso_discovery")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_discovery")
 	}
 	state, err := randomB64(32)
 	if err != nil {
-		return c.Redirect(http.StatusFound, "/signin?error=sso_internal")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_internal")
 	}
 	nonce, err := randomB64(32)
 	if err != nil {
-		return c.Redirect(http.StatusFound, "/signin?error=sso_internal")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_internal")
 	}
 	h.setSSOTempCookie(c, ssoStateCookie, state)
 	h.setSSOTempCookie(c, ssoNonceCookie, nonce)
@@ -256,61 +256,61 @@ func (h *authHandlers) oauthCallback(c *echo.Context) error {
 	stateCookie, err := c.Cookie(ssoStateCookie)
 	h.clearSSOTempCookie(c, ssoStateCookie)
 	if err != nil || stateCookie.Value == "" {
-		return c.Redirect(http.StatusFound, "/signin?error=sso_state")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_state")
 	}
 	// Constant-time comparison: defensive even though both sides are
 	// server-issued, since the query value comes back through the IdP and
 	// the user's browser. Avoids any timing channel that future logging
 	// or framework changes might accidentally expose.
 	if subtle.ConstantTimeCompare([]byte(stateCookie.Value), []byte(c.QueryParam("state"))) != 1 {
-		return c.Redirect(http.StatusFound, "/signin?error=sso_state")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_state")
 	}
 	nonceCookie, err := c.Cookie(ssoNonceCookie)
 	h.clearSSOTempCookie(c, ssoNonceCookie)
 	if err != nil || nonceCookie.Value == "" {
-		return c.Redirect(http.StatusFound, "/signin?error=sso_state")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_state")
 	}
 
 	if errParam := c.QueryParam("error"); errParam != "" {
-		return c.Redirect(http.StatusFound, "/signin?error=sso_denied")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_denied")
 	}
 	code := c.QueryParam("code")
 	if code == "" {
-		return c.Redirect(http.StatusFound, "/signin?error=sso_state")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_state")
 	}
 
 	p, err := h.q.GetSSOProviderBySlug(ctx, slug)
 	if err != nil || !p.Enabled {
-		return c.Redirect(http.StatusFound, "/signin?error=sso_unknown")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_unknown")
 	}
 	prov, err := h.oidcProviderFor(ctx, p)
 	if err != nil {
-		return c.Redirect(http.StatusFound, "/signin?error=sso_discovery")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_discovery")
 	}
 	cfg := h.oauth2Config(c, prov, p)
 
 	tok, err := cfg.Exchange(ctx, code)
 	if err != nil {
-		return c.Redirect(http.StatusFound, "/signin?error=sso_exchange")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_exchange")
 	}
 	rawIDToken, ok := tok.Extra("id_token").(string)
 	if !ok || rawIDToken == "" {
-		return c.Redirect(http.StatusFound, "/signin?error=sso_no_id_token")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_no_id_token")
 	}
 	verifier := prov.Verifier(&oidc.Config{ClientID: p.ClientID})
 	idToken, err := verifier.Verify(ctx, rawIDToken)
 	if err != nil {
-		return c.Redirect(http.StatusFound, "/signin?error=sso_verify")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_verify")
 	}
 	if idToken.Nonce != nonceCookie.Value {
-		return c.Redirect(http.StatusFound, "/signin?error=sso_state")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_state")
 	}
 	var claims oidcUserClaims
 	if err := idToken.Claims(&claims); err != nil {
-		return c.Redirect(http.StatusFound, "/signin?error=sso_claims")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_claims")
 	}
 	if claims.Sub == "" {
-		return c.Redirect(http.StatusFound, "/signin?error=sso_claims")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_claims")
 	}
 	email := strings.ToLower(strings.TrimSpace(claims.Email))
 
@@ -324,11 +324,11 @@ func (h *authHandlers) oauthCallback(c *echo.Context) error {
 				"provider":        p.Slug,
 			},
 		})
-		return c.Redirect(http.StatusFound, "/signin?error=sso_"+err.Error())
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_"+err.Error())
 	}
 
 	if _, _, _, err := h.issueSession(ctx, c, user); err != nil {
-		return c.Redirect(http.StatusFound, "/signin?error=sso_internal")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_internal")
 	}
 	uid := user.ID
 	h.auditor.LogFromEcho(c, audit.Event{
@@ -360,11 +360,11 @@ func (h *authHandlers) oauthCallback(c *echo.Context) error {
 				if !h.cfg.IsProd() {
 					scheme = "http"
 				}
-				return c.Redirect(http.StatusFound, scheme+"://"+rh.Value+"/api/v1/sso_handoff?token="+tok)
+				return c.Redirect(http.StatusFound, scheme+"://"+rh.Value+"/_torii/api/v1/sso_handoff?token="+tok)
 			}
 		}
 	}
-	return c.Redirect(http.StatusFound, "/dashboard")
+	return c.Redirect(http.StatusFound, "/_torii/dashboard")
 }
 
 // ssoHandoff is the cross-host counterpart to oauthCallback: it lands on a
@@ -375,25 +375,25 @@ func (h *authHandlers) oauthCallback(c *echo.Context) error {
 func (h *authHandlers) ssoHandoff(c *echo.Context) error {
 	tok := c.QueryParam("token")
 	if tok == "" {
-		return c.Redirect(http.StatusFound, "/signin?error=handoff")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=handoff")
 	}
 	claims, err := auth.ParseHandoffToken(tok, h.cfg.JWTSecret)
 	if err != nil {
-		return c.Redirect(http.StatusFound, "/signin?error=handoff")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=handoff")
 	}
 	if !sameNormalizedHost(claims.TargetHost, c.Request().Host) {
-		return c.Redirect(http.StatusFound, "/signin?error=handoff")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=handoff")
 	}
 	uid, err := uuid.Parse(claims.Subject)
 	if err != nil {
-		return c.Redirect(http.StatusFound, "/signin?error=handoff")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=handoff")
 	}
 	user, err := h.q.GetUserByID(c.Request().Context(), uid)
 	if err != nil {
-		return c.Redirect(http.StatusFound, "/signin?error=handoff")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=handoff")
 	}
 	if _, _, _, err := h.issueSession(c.Request().Context(), c, user); err != nil {
-		return c.Redirect(http.StatusFound, "/signin?error=handoff")
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=handoff")
 	}
 	return c.Redirect(http.StatusFound, "/")
 }

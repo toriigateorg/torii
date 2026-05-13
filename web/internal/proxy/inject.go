@@ -134,7 +134,7 @@ const toriiOverlay = `<div id="__torii_overlay" data-torii></div>
   signoutItem.addEventListener('click', function(){
     signoutItem.disabled = true;
     hideMenu();
-    fetch('/api/v1/logout', { method:'POST', credentials:'include', cache:'no-store' })
+    fetch('/_torii/api/v1/logout', { method:'POST', credentials:'include', cache:'no-store' })
       .catch(function(){})
       .finally(function(){
         window.location.replace('/?torii_logout=' + Date.now());

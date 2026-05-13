@@ -24,6 +24,7 @@ export default defineNuxtConfig({
   },
 
   app: {
+    baseURL: "/_torii/",
     head: {
       htmlAttrs: { lang: "en" },
       meta: [
@@ -59,11 +60,11 @@ export default defineNuxtConfig({
   modules: ["shadcn-nuxt", "@nuxtjs/color-mode", "@nuxtjs/seo"],
 
   sitemap: {
-    exclude: ["/dashboard", "/admin/**", "/health"],
+    exclude: ["/_torii/dashboard", "/_torii/admin/**", "/_torii/health"],
   },
 
   robots: {
-    disallow: ["/dashboard", "/admin/", "/api/v1/"],
+    disallow: ["/_torii/dashboard", "/_torii/admin/", "/_torii/api/v1/"],
   },
 
   ogImage: {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -322,27 +323,18 @@ func pipePrefixed(wg *sync.WaitGroup, r io.Reader, prefix string) {
 	}
 }
 
-// dispatch routes incoming non-API traffic by Host. Requests for the torii
-// domain are served by the SPA handler; requests whose Host matches a
-// configured service.domain are reverse-proxied (when the caller carries a
-// valid torii access token); everything else falls through to the SPA so the
-// signin page or 4xx page can render under the unknown domain.
-// hasSessionMarker reports whether the request carries the non-secret
-// session marker cookie. Used by dispatch to decide whether an unauthenticated
-// request on a service domain is worth a refresh-and-redirect attempt
-// (marker present → refresh token is still alive) or whether the user is
-// genuinely logged out and should fall through to the SPA (no marker →
-// avoid loops where /signin keeps redirecting to a refresh that always
-// fails).
+// hasSessionMarker reports whether the request carries the non-secret session
+// marker cookie. The refresh cookie now lives at Path=/_torii/api/v1/, so it
+// no longer rides along on service-path requests; the marker (Path=/) is the
+// only signal dispatch has that a refresh might succeed on a proxied host.
 func hasSessionMarker(r *http.Request) bool {
 	ck, err := r.Cookie(auth.SessionCookie)
 	return err == nil && ck != nil && ck.Value != ""
 }
 
-// isDocumentRequest is true for top-level browser navigations (GET requests
-// for HTML). Used to decide whether dispatch should 302-bounce through the
-// refresh endpoint or just fall through to the SPA: redirecting an XHR or an
-// asset fetch to an HTML response would corrupt those callers.
+// isDocumentRequest is true for top-level browser navigations. Dispatch uses
+// it to decide between a 302 (safe for navigations) and a JSON 401 (correct
+// for XHR/asset callers that would choke on an HTML redirect).
 func isDocumentRequest(r *http.Request) bool {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return false
@@ -356,37 +348,31 @@ func isDocumentRequest(r *http.Request) bool {
 	return strings.Contains(r.Header.Get("Accept"), "text/html")
 }
 
+// dispatch routes traffic by path: anything under /_torii/* is torii (SPA or
+// API, on any host); other paths on TORII_URL bounce to /_torii/, and on a
+// matched service host they reverse-proxy to the upstream when authenticated.
 func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logger, refresher api.SessionRefresher, spa echo.HandlerFunc) echo.HandlerFunc {
+	_ = refresher
 	return func(c *echo.Context) error {
-		// Never let the SPA handler answer a request that was meant for the
-		// API but didn't match a registered route — that would return an
-		// HTML body to a JSON client and cause subtle bugs.
-		if strings.HasPrefix(c.Request().URL.Path, "/api/") {
+		path := c.Request().URL.Path
+		// Unmatched API paths must not fall through to the SPA — a JSON
+		// client expecting an error would parse the index.html as garbage.
+		if strings.HasPrefix(path, "/_torii/api/") {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "not found"})
 		}
-		if cfg == nil {
+		if path == "/_torii" || strings.HasPrefix(path, "/_torii/") {
 			return spa(c)
+		}
+		if cfg == nil {
+			return c.Redirect(http.StatusFound, "/_torii/")
 		}
 		host := c.Request().Host
 		if cfg.IsToriiHost(host) {
-			return spa(c)
+			return c.Redirect(http.StatusFound, "/_torii/")
 		}
 		if cache != nil {
 			if svc, ok := cache.Lookup(c.Request().Context(), host); ok {
 				claims, err := auth.ClaimsFromProxyRequest(c, cfg.JWTSecret)
-				// Access token expired/missing on a proxied domain. The
-				// refresh cookie lives at Path=/ so it rides along on
-				// every request to this host — including XHRs — letting
-				// us rotate the session inline and proceed transparently.
-				// We only attempt this when the (non-secret) session
-				// marker is present: an absent marker means the user is
-				// genuinely logged out, so falling through to the SPA is
-				// correct (avoids hammering the refresh path after logout).
-				if err != nil && refresher != nil && hasSessionMarker(c.Request()) {
-					if refreshed, rerr := refresher.AttemptCookieRefresh(c); rerr == nil {
-						claims, err = refreshed, nil
-					}
-				}
 				if err != nil {
 					if auditor != nil {
 						svcID := svc.ID
@@ -398,11 +384,18 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logg
 							Metadata: map[string]any{
 								"reason": "unauthenticated",
 								"host":   host,
-								"path":   c.Request().URL.Path,
+								"path":   path,
 							},
 						})
 					}
-					return spa(c)
+					if !isDocumentRequest(c.Request()) {
+						return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthenticated"})
+					}
+					to := c.Request().URL.RequestURI()
+					if hasSessionMarker(c.Request()) {
+						return c.Redirect(http.StatusFound, "/_torii/api/v1/refresh_and_redirect?to="+url.QueryEscape(to))
+					}
+					return c.Redirect(http.StatusFound, "/_torii/signin?next="+url.QueryEscape(to))
 				}
 				roleIDs := make([]uuid.UUID, 0, len(claims.RoleIDs))
 				for _, s := range claims.RoleIDs {
@@ -427,7 +420,7 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logg
 							Metadata: map[string]any{
 								"reason": "no_role",
 								"host":   host,
-								"path":   c.Request().URL.Path,
+								"path":   path,
 							},
 						})
 					}
@@ -446,7 +439,12 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logg
 				}, c)
 			}
 		}
-		return spa(c)
+		// Unknown host, non-/_torii path: redirect navigations to /_torii/signin
+		// (so the user lands somewhere sensible); 404 everything else.
+		if isDocumentRequest(c.Request()) {
+			return c.Redirect(http.StatusFound, "/_torii/signin")
+		}
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "not found"})
 	}
 }
 

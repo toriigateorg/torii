@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,39 +16,6 @@ import (
 	"torii/internal/proxy"
 )
 
-// toriiHostOnlyPathPrefixes is the deny-list of /api/v1/* paths that must
-// only be reachable on cfg.ToriiURL. The primary case is /api/v1/admin/*:
-// without this gate, an upstream backend that lifted the torii access cookie
-// from a proxied request could replay it against the admin API on its own
-// hostname (dispatch otherwise serves /api/v1/* on every host because the v1
-// group is mounted on the global Echo). With Wave 1.1's cookie stripping the
-// cookie shouldn't reach upstream in the first place; this is defense in
-// depth.
-//
-// All other auth/me/token endpoints stay reachable cross-host because the
-// SPA renders on service domains too (dispatch falls through to the SPA for
-// unauthenticated requests on proxied hosts) and needs them to function.
-var toriiHostOnlyPathPrefixes = []string{
-	"/api/v1/admin/",
-}
-
-func requireToriiHost(cfg *config.Config) echo.MiddlewareFunc {
-	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c *echo.Context) error {
-			if cfg.IsToriiHost(c.Request().Host) {
-				return next(c)
-			}
-			path := c.Request().URL.Path
-			for _, blocked := range toriiHostOnlyPathPrefixes {
-				if strings.HasPrefix(path, blocked) {
-					return c.JSON(http.StatusNotFound, map[string]string{"error": "not found"})
-				}
-			}
-			return next(c)
-		}
-	}
-}
-
 // SessionRefresher rotates the caller's session using the refresh cookie,
 // sets fresh auth cookies on the response, and returns the resulting claims.
 // Implemented by *authHandlers so the proxy dispatch can recover from an
@@ -58,13 +24,10 @@ type SessionRefresher interface {
 	AttemptCookieRefresh(c *echo.Context) (*auth.Claims, error)
 }
 
-// Register mounts the /api/v1 routes on the given echo instance and returns
-// a SessionRefresher (nil when no DB pool / config is wired).
+// Register mounts the /_torii/api/v1 routes on the given echo instance and
+// returns a SessionRefresher (nil when no DB pool / config is wired).
 func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logger) SessionRefresher {
-	v1 := e.Group("/api/v1")
-	if cfg != nil {
-		v1.Use(requireToriiHost(cfg))
-	}
+	v1 := e.Group("/_torii/api/v1")
 
 	v1.GET("/health", func(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})

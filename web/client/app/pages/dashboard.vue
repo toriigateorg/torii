@@ -21,7 +21,7 @@ async function loadServices() {
   loading.value = true
   errorMsg.value = null
   try {
-    const res = await $fetch<{ items: Service[] }>("/api/v1/me/services", {
+    const res = await $fetch<{ items: Service[] }>("/_torii/api/v1/me/services", {
       credentials: "include",
       headers: authHeaders(),
     })

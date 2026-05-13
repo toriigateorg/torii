@@ -108,7 +108,7 @@ func isStateChanging(method string) bool {
 // access cookie alone, even on state-changing methods. /logout must succeed
 // even if the SPA's in-memory token was lost (idempotent cleanup).
 func isCookieAllowedPath(path string) bool {
-	return path == "/api/v1/logout"
+	return path == "/_torii/api/v1/logout"
 }
 
 var errMissingToken = errors.New("missing token")

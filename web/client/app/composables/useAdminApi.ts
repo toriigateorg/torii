@@ -213,205 +213,205 @@ export function useAdminApi() {
 
   return {
     stats(window: StatsWindow) {
-      return $fetch<StatsResponse>("/api/v1/admin/stats", {
+      return $fetch<StatsResponse>("/_torii/api/v1/admin/stats", {
         ...opts(),
         query: { window },
       })
     },
     listUsers(page: number, pageSize = 20) {
-      return $fetch<UserListResponse>("/api/v1/admin/users", {
+      return $fetch<UserListResponse>("/_torii/api/v1/admin/users", {
         ...opts(),
         query: { page, page_size: pageSize },
       })
     },
     createUser(payload: CreateUserPayload) {
-      return $fetch<AuthUser>("/api/v1/admin/users", {
+      return $fetch<AuthUser>("/_torii/api/v1/admin/users", {
         ...opts(),
         method: "POST",
         body: payload,
       })
     },
     deleteUser(id: string) {
-      return $fetch(`/api/v1/admin/users/${id}`, {
+      return $fetch(`/_torii/api/v1/admin/users/${id}`, {
         ...opts(),
         method: "DELETE",
       })
     },
     listUserRoles(userId: string) {
-      return $fetch<{ items: Role[] }>(`/api/v1/admin/users/${userId}/roles`, opts())
+      return $fetch<{ items: Role[] }>(`/_torii/api/v1/admin/users/${userId}/roles`, opts())
     },
     assignUserRole(userId: string, roleId: string) {
-      return $fetch(`/api/v1/admin/users/${userId}/roles`, {
+      return $fetch(`/_torii/api/v1/admin/users/${userId}/roles`, {
         ...opts(),
         method: "POST",
         body: { role_id: roleId },
       })
     },
     revokeUserRole(userId: string, roleId: string) {
-      return $fetch(`/api/v1/admin/users/${userId}/roles/${roleId}`, {
+      return $fetch(`/_torii/api/v1/admin/users/${userId}/roles/${roleId}`, {
         ...opts(),
         method: "DELETE",
       })
     },
     listTokens(page: number, pageSize = 20) {
-      return $fetch<TokenListResponse>("/api/v1/admin/tokens", {
+      return $fetch<TokenListResponse>("/_torii/api/v1/admin/tokens", {
         ...opts(),
         query: { page, page_size: pageSize },
       })
     },
     revokeToken(id: string) {
-      return $fetch(`/api/v1/admin/tokens/${id}`, {
+      return $fetch(`/_torii/api/v1/admin/tokens/${id}`, {
         ...opts(),
         method: "DELETE",
       })
     },
     cleanupExpiredTokens() {
-      return $fetch<{ deleted: number }>("/api/v1/admin/tokens/cleanup", {
+      return $fetch<{ deleted: number }>("/_torii/api/v1/admin/tokens/cleanup", {
         ...opts(),
         method: "POST",
       })
     },
     listServices(page: number, pageSize = 20) {
-      return $fetch<ServiceListResponse>("/api/v1/admin/services", {
+      return $fetch<ServiceListResponse>("/_torii/api/v1/admin/services", {
         ...opts(),
         query: { page, page_size: pageSize },
       })
     },
     createService(payload: ServicePayload) {
-      return $fetch<Service>("/api/v1/admin/services", {
+      return $fetch<Service>("/_torii/api/v1/admin/services", {
         ...opts(),
         method: "POST",
         body: payload,
       })
     },
     updateService(id: string, payload: ServicePayload) {
-      return $fetch<Service>(`/api/v1/admin/services/${id}`, {
+      return $fetch<Service>(`/_torii/api/v1/admin/services/${id}`, {
         ...opts(),
         method: "PATCH",
         body: payload,
       })
     },
     deleteService(id: string) {
-      return $fetch(`/api/v1/admin/services/${id}`, {
+      return $fetch(`/_torii/api/v1/admin/services/${id}`, {
         ...opts(),
         method: "DELETE",
       })
     },
     checkServiceHealth(id: string) {
-      return $fetch<ServiceHealth>(`/api/v1/admin/services/${id}/health`, opts())
+      return $fetch<ServiceHealth>(`/_torii/api/v1/admin/services/${id}/health`, opts())
     },
     listRoles(page: number, pageSize = 20) {
-      return $fetch<RoleListResponse>("/api/v1/admin/roles", {
+      return $fetch<RoleListResponse>("/_torii/api/v1/admin/roles", {
         ...opts(),
         query: { page, page_size: pageSize },
       })
     },
     getRole(id: string) {
-      return $fetch<Role>(`/api/v1/admin/roles/${id}`, opts())
+      return $fetch<Role>(`/_torii/api/v1/admin/roles/${id}`, opts())
     },
     createRole(payload: CreateRolePayload) {
-      return $fetch<Role>("/api/v1/admin/roles", {
+      return $fetch<Role>("/_torii/api/v1/admin/roles", {
         ...opts(),
         method: "POST",
         body: payload,
       })
     },
     updateRole(id: string, payload: UpdateRolePayload) {
-      return $fetch<Role>(`/api/v1/admin/roles/${id}`, {
+      return $fetch<Role>(`/_torii/api/v1/admin/roles/${id}`, {
         ...opts(),
         method: "PATCH",
         body: payload,
       })
     },
     deleteRole(id: string) {
-      return $fetch(`/api/v1/admin/roles/${id}`, {
+      return $fetch(`/_torii/api/v1/admin/roles/${id}`, {
         ...opts(),
         method: "DELETE",
       })
     },
     setRolePermissions(id: string, permissions: string[]) {
-      return $fetch<{ permissions: string[] }>(`/api/v1/admin/roles/${id}/permissions`, {
+      return $fetch<{ permissions: string[] }>(`/_torii/api/v1/admin/roles/${id}/permissions`, {
         ...opts(),
         method: "PUT",
         body: { permissions },
       })
     },
     listRoleServices(id: string) {
-      return $fetch<{ items: Service[] }>(`/api/v1/admin/roles/${id}/services`, opts())
+      return $fetch<{ items: Service[] }>(`/_torii/api/v1/admin/roles/${id}/services`, opts())
     },
     assignRoleService(roleId: string, serviceId: string) {
-      return $fetch(`/api/v1/admin/roles/${roleId}/services`, {
+      return $fetch(`/_torii/api/v1/admin/roles/${roleId}/services`, {
         ...opts(),
         method: "POST",
         body: { service_id: serviceId },
       })
     },
     revokeRoleService(roleId: string, serviceId: string) {
-      return $fetch(`/api/v1/admin/roles/${roleId}/services/${serviceId}`, {
+      return $fetch(`/_torii/api/v1/admin/roles/${roleId}/services/${serviceId}`, {
         ...opts(),
         method: "DELETE",
       })
     },
     listRoleUsers(id: string, page: number, pageSize = 20) {
-      return $fetch<UserListResponse>(`/api/v1/admin/roles/${id}/users`, {
+      return $fetch<UserListResponse>(`/_torii/api/v1/admin/roles/${id}/users`, {
         ...opts(),
         query: { page, page_size: pageSize },
       })
     },
     listPermissions() {
-      return $fetch<{ items: string[] }>("/api/v1/admin/permissions", opts())
+      return $fetch<{ items: string[] }>("/_torii/api/v1/admin/permissions", opts())
     },
     listSSO(page: number, pageSize = 20) {
-      return $fetch<SSOProviderListResponse>("/api/v1/admin/sso", {
+      return $fetch<SSOProviderListResponse>("/_torii/api/v1/admin/sso", {
         ...opts(),
         query: { page, page_size: pageSize },
       })
     },
     createSSO(payload: SSOProviderPayload) {
-      return $fetch<SSOProvider>("/api/v1/admin/sso", {
+      return $fetch<SSOProvider>("/_torii/api/v1/admin/sso", {
         ...opts(),
         method: "POST",
         body: payload,
       })
     },
     updateSSO(id: string, payload: SSOProviderPayload) {
-      return $fetch<SSOProvider>(`/api/v1/admin/sso/${id}`, {
+      return $fetch<SSOProvider>(`/_torii/api/v1/admin/sso/${id}`, {
         ...opts(),
         method: "PATCH",
         body: payload,
       })
     },
     deleteSSO(id: string) {
-      return $fetch(`/api/v1/admin/sso/${id}`, {
+      return $fetch(`/_torii/api/v1/admin/sso/${id}`, {
         ...opts(),
         method: "DELETE",
       })
     },
     getSettings() {
-      return $fetch<AppSettings>("/api/v1/admin/settings", opts())
+      return $fetch<AppSettings>("/_torii/api/v1/admin/settings", opts())
     },
     updateSettings(payload: UpdateAppSettingsPayload) {
-      return $fetch<AppSettings>("/api/v1/admin/settings", {
+      return $fetch<AppSettings>("/_torii/api/v1/admin/settings", {
         ...opts(),
         method: "PUT",
         body: payload,
       })
     },
     listAPITokens(page: number, pageSize = 20) {
-      return $fetch<APITokenListResponse>("/api/v1/admin/api_tokens", {
+      return $fetch<APITokenListResponse>("/_torii/api/v1/admin/api_tokens", {
         ...opts(),
         query: { page, page_size: pageSize },
       })
     },
     createAPIToken(payload: CreateAPITokenPayload) {
-      return $fetch<CreateAPITokenResponse>("/api/v1/admin/api_tokens", {
+      return $fetch<CreateAPITokenResponse>("/_torii/api/v1/admin/api_tokens", {
         ...opts(),
         method: "POST",
         body: payload,
       })
     },
     deleteAPIToken(id: string) {
-      return $fetch(`/api/v1/admin/api_tokens/${id}`, {
+      return $fetch(`/_torii/api/v1/admin/api_tokens/${id}`, {
         ...opts(),
         method: "DELETE",
       })
@@ -426,7 +426,7 @@ export function useAdminApi() {
       if (query.target_id) q.target_id = query.target_id
       if (query.from) q.from = query.from
       if (query.to) q.to = query.to
-      return $fetch<AuditLogListResponse>("/api/v1/admin/audit", {
+      return $fetch<AuditLogListResponse>("/_torii/api/v1/admin/audit", {
         ...opts(),
         query: q,
       })

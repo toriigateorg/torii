@@ -47,7 +47,12 @@ func Handler(toriiURL string) echo.HandlerFunc {
 		}
 	}
 	injection := buildInjection(toriiURL)
-	fileServer := http.FileServer(http.FS(spaFS{sub}))
+	// Strip the /_torii namespace before the FileServer resolves the request:
+	// the embedded FS is rooted at the SPA's content, but every request that
+	// reaches us has been routed through dispatch under /_torii/*. Nuxt's
+	// app.baseURL = "/_torii/" emits asset URLs with the same prefix, so the
+	// FileServer needs the raw path (e.g. /_nuxt/foo.js) to find them.
+	fileServer := http.StripPrefix("/_torii", http.FileServer(http.FS(spaFS{sub})))
 	return func(c *echo.Context) error {
 		rw := &htmlInjector{ResponseWriter: c.Response(), inject: injection}
 		fileServer.ServeHTTP(rw, c.Request())
