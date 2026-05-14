@@ -66,13 +66,7 @@ func (h *authHandlers) oauthRedirectURL(_ *echo.Context, slug string) string {
 	if !h.cfg.IsProd() {
 		scheme = "http"
 	}
-	// Legacy callback URL: matches the redirect_uri registered on the IdP
-	// before the /_torii namespace move. The legacy shim in router.go 302s
-	// the inbound callback to the new path so the state/nonce cookies
-	// (Path=/_torii/api/v1/oauth/) ride along. To be flipped to
-	// /_torii/api/v1/oauth/<slug>/callback (and the shim removed) within 2
-	// releases — operators must re-register IdP callbacks first.
-	return scheme + "://" + h.cfg.ToriiURL + "/api/v1/oauth/" + slug + "/callback"
+	return scheme + "://" + h.cfg.ToriiURL + "/_torii/api/v1/oauth/" + slug + "/callback"
 }
 
 func (h *authHandlers) oauth2Config(c *echo.Context, prov *oidc.Provider, p db.SsoProvider) *oauth2.Config {
