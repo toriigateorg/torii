@@ -395,7 +395,7 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logg
 					if hasSessionMarker(c.Request()) {
 						return c.Redirect(http.StatusFound, "/_torii/api/v1/refresh_and_redirect?to="+url.QueryEscape(to))
 					}
-					return c.Redirect(http.StatusFound, "/_torii/signin?next="+url.QueryEscape(to))
+					return c.Redirect(http.StatusFound, "/_torii/signin?to="+url.QueryEscape(to))
 				}
 				roleIDs := make([]uuid.UUID, 0, len(claims.RoleIDs))
 				for _, s := range claims.RoleIDs {
@@ -440,9 +440,12 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logg
 			}
 		}
 		// Unknown host, non-/_torii path: redirect navigations to /_torii/signin
-		// (so the user lands somewhere sensible); 404 everything else.
+		// (so the user lands somewhere sensible); 404 everything else. Preserve
+		// the original path as ?to= so the SPA can bounce the user back after
+		// signin — useful when a service is being provisioned and the cache
+		// hasn't picked it up yet.
 		if isDocumentRequest(c.Request()) {
-			return c.Redirect(http.StatusFound, "/_torii/signin")
+			return c.Redirect(http.StatusFound, "/_torii/signin?to="+url.QueryEscape(c.Request().URL.RequestURI()))
 		}
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "not found"})
 	}

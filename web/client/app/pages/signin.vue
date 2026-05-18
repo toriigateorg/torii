@@ -58,11 +58,11 @@ async function onSubmit() {
     await signin(identifier.value.trim(), password.value)
     const expected = useToriiUrl()
     const route = useRoute()
-    const next = typeof route.query.next === "string" ? route.query.next : ""
+    const to = typeof route.query.to === "string" ? route.query.to : ""
     if (expected && window.location.host !== expected) {
       // Service host: hard-load the original target (or "/") so the Go
       // dispatch re-evaluates with the new cookies in place.
-      window.location.assign(next && next.startsWith("/") ? next : "/")
+      window.location.assign(to && to.startsWith("/") ? to : "/")
       return
     }
     await navigateTo("/dashboard")
