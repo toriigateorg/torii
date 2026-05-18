@@ -13,7 +13,10 @@ export default defineNuxtRouteMiddleware((to) => {
 
   // Vue Router strips app.baseURL from to.path, so the comparison is against
   // the unprefixed route names even though the browser URL is /_torii/signin.
-  const normalized = to.path.replace(/\/+$/, "") || "/"
+  // Normalize: strip baseURL if present (defensive against early-hydration
+  // edge cases), drop trailing slashes, then match.
+  const stripped = to.path.replace(/^\/_torii/, "") || "/"
+  const normalized = stripped.replace(/\/+$/, "") || "/"
   if (normalized === "/signin" || normalized === "/signup") return
 
   const { isAuthed } = useAuth()
