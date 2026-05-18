@@ -44,6 +44,7 @@ export interface Service {
   domain: string
   headers: Record<string, string>
   preserve_host: boolean
+  passthrough_errors: boolean
   created_at: string
   updated_at: string
 }
@@ -66,6 +67,7 @@ export interface ServicePayload {
   domain: string
   headers: Record<string, string>
   preserve_host: boolean
+  passthrough_errors: boolean
 }
 
 export interface Role {

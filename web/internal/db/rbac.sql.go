@@ -238,6 +238,7 @@ SELECT
     s.headers,
     s.signing_secret,
     s.preserve_host,
+    s.passthrough_errors,
     s.created_at,
     s.updated_at,
     COALESCE(
@@ -248,17 +249,18 @@ FROM services s
 `
 
 type ListAllServicesWithRolesForCacheRow struct {
-	ID            uuid.UUID
-	Title         string
-	Description   string
-	ServiceUrl    string
-	Domain        string
-	Headers       []byte
-	SigningSecret []byte
-	PreserveHost  bool
-	CreatedAt     pgtype.Timestamptz
-	UpdatedAt     pgtype.Timestamptz
-	RoleIds       []uuid.UUID
+	ID                uuid.UUID
+	Title             string
+	Description       string
+	ServiceUrl        string
+	Domain            string
+	Headers           []byte
+	SigningSecret     []byte
+	PreserveHost      bool
+	PassthroughErrors bool
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+	RoleIds           []uuid.UUID
 }
 
 func (q *Queries) ListAllServicesWithRolesForCache(ctx context.Context) ([]ListAllServicesWithRolesForCacheRow, error) {
@@ -279,6 +281,7 @@ func (q *Queries) ListAllServicesWithRolesForCache(ctx context.Context) ([]ListA
 			&i.Headers,
 			&i.SigningSecret,
 			&i.PreserveHost,
+			&i.PassthroughErrors,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.RoleIds,
@@ -320,7 +323,7 @@ func (q *Queries) ListRolePermissions(ctx context.Context, roleID uuid.UUID) ([]
 }
 
 const listRoleServices = `-- name: ListRoleServices :many
-SELECT s.id, s.title, s.description, s.service_url, s.domain, s.headers, s.created_at, s.updated_at, s.signing_secret, s.preserve_host
+SELECT s.id, s.title, s.description, s.service_url, s.domain, s.headers, s.created_at, s.updated_at, s.signing_secret, s.preserve_host, s.passthrough_errors
 FROM services s
 JOIN role_services rs ON rs.service_id = s.id
 WHERE rs.role_id = $1
@@ -347,6 +350,7 @@ func (q *Queries) ListRoleServices(ctx context.Context, roleID uuid.UUID) ([]Ser
 			&i.UpdatedAt,
 			&i.SigningSecret,
 			&i.PreserveHost,
+			&i.PassthroughErrors,
 		); err != nil {
 			return nil, err
 		}
@@ -432,7 +436,7 @@ func (q *Queries) ListServiceRoles(ctx context.Context, serviceID uuid.UUID) ([]
 }
 
 const listServicesForUser = `-- name: ListServicesForUser :many
-SELECT DISTINCT s.id, s.title, s.description, s.service_url, s.domain, s.headers, s.created_at, s.updated_at, s.signing_secret, s.preserve_host
+SELECT DISTINCT s.id, s.title, s.description, s.service_url, s.domain, s.headers, s.created_at, s.updated_at, s.signing_secret, s.preserve_host, s.passthrough_errors
 FROM services s
 JOIN role_services rs ON rs.service_id = s.id
 JOIN user_roles ur ON ur.role_id = rs.role_id
@@ -460,6 +464,7 @@ func (q *Queries) ListServicesForUser(ctx context.Context, userID uuid.UUID) ([]
 			&i.UpdatedAt,
 			&i.SigningSecret,
 			&i.PreserveHost,
+			&i.PassthroughErrors,
 		); err != nil {
 			return nil, err
 		}

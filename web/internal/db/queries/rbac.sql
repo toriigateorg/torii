@@ -122,6 +122,7 @@ SELECT
     s.headers,
     s.signing_secret,
     s.preserve_host,
+    s.passthrough_errors,
     s.created_at,
     s.updated_at,
     COALESCE(

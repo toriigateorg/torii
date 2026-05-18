@@ -70,16 +70,17 @@ type RoleService struct {
 }
 
 type Service struct {
-	ID            uuid.UUID
-	Title         string
-	Description   string
-	ServiceUrl    string
-	Domain        string
-	Headers       []byte
-	CreatedAt     pgtype.Timestamptz
-	UpdatedAt     pgtype.Timestamptz
-	SigningSecret []byte
-	PreserveHost  bool
+	ID                uuid.UUID
+	Title             string
+	Description       string
+	ServiceUrl        string
+	Domain            string
+	Headers           []byte
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+	SigningSecret     []byte
+	PreserveHost      bool
+	PassthroughErrors bool
 }
 
 type SsoProvider struct {

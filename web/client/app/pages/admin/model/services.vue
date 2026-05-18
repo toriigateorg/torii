@@ -34,6 +34,7 @@ const form = ref<ServicePayload>({
   domain: "",
   headers: {},
   preserve_host: false,
+  passthrough_errors: true,
 })
 const headerRows = ref<HeaderRow[]>([])
 
@@ -86,7 +87,7 @@ watch(page, load)
 onMounted(load)
 
 function resetForm() {
-  form.value = { title: "", description: "", service_url: "", domain: "", headers: {}, preserve_host: false }
+  form.value = { title: "", description: "", service_url: "", domain: "", headers: {}, preserve_host: false, passthrough_errors: true }
   headerRows.value = []
   formError.value = null
   editTargetId.value = null
@@ -108,6 +109,7 @@ function openEdit(svc: Service) {
     domain: svc.domain,
     headers: { ...svc.headers },
     preserve_host: svc.preserve_host,
+    passthrough_errors: svc.passthrough_errors,
   }
   headerRows.value = Object.entries(svc.headers).map(([key, value]) => ({ key, value }))
   formError.value = null
@@ -160,6 +162,7 @@ async function submit() {
       domain: form.value.domain.trim().toLowerCase(),
       headers: collectHeaders(),
       preserve_host: form.value.preserve_host,
+      passthrough_errors: form.value.passthrough_errors,
     }
     if (formMode.value === "create") {
       await api.createService(payload)
@@ -398,6 +401,21 @@ async function confirmDelete() {
                 <span class="font-mono">Host</span> header to the upstream. Enable for apps like
                 Streamlit that build redirects from <span class="font-mono">Host</span>; leave off
                 for vhost-based upstreams.
+              </p>
+            </div>
+          </div>
+
+          <div class="flex items-start gap-3 hairline rounded-md p-3 bg-muted/20">
+            <Checkbox
+              id="svc-passthrough-errors"
+              :model-value="form.passthrough_errors"
+              @update:model-value="(v) => (form.passthrough_errors = v === true)"
+            />
+            <div class="flex flex-col gap-0.5 -mt-0.5">
+              <Label for="svc-passthrough-errors" class="cursor-pointer">Pass through upstream errors</Label>
+              <p class="text-xs text-muted-foreground leading-relaxed">
+                When the upstream returns a 5xx, forward its response body as-is. Disable to
+                replace upstream 5xx responses with torii's generic error page.
               </p>
             </div>
           </div>

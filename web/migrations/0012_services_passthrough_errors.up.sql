@@ -1,0 +1,2 @@
+ALTER TABLE services
+    ADD COLUMN passthrough_errors BOOLEAN NOT NULL DEFAULT TRUE;

@@ -1,6 +1,6 @@
 -- name: CreateService :one
-INSERT INTO services (title, description, service_url, domain, headers, preserve_host)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO services (title, description, service_url, domain, headers, preserve_host, passthrough_errors)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
 -- name: GetServiceByID :one
@@ -25,6 +25,7 @@ SET title = $2,
     domain = $5,
     headers = $6,
     preserve_host = $7,
+    passthrough_errors = $8,
     updated_at = now()
 WHERE id = $1
 RETURNING *;

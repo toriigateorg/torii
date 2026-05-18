@@ -20,9 +20,10 @@ type CachedService struct {
 	Domain        string
 	Target        *url.URL
 	Headers       map[string]string
-	SigningSecret []byte
-	PreserveHost  bool
-	RoleIDs       map[uuid.UUID]struct{}
+	SigningSecret     []byte
+	PreserveHost      bool
+	PassthroughErrors bool
+	RoleIDs           map[uuid.UUID]struct{}
 }
 
 func (s *CachedService) AllowsAnyRole(roleIDs []uuid.UUID) bool {
@@ -109,14 +110,15 @@ func (c *ServiceCache) refreshLocked(ctx context.Context) {
 			roleSet[id] = struct{}{}
 		}
 		next[r.Domain] = &CachedService{
-			ID:            r.ID,
-			Title:         r.Title,
-			Domain:        r.Domain,
-			Target:        target,
-			Headers:       headers,
-			SigningSecret: r.SigningSecret,
-			PreserveHost:  r.PreserveHost,
-			RoleIDs:       roleSet,
+			ID:                r.ID,
+			Title:             r.Title,
+			Domain:            r.Domain,
+			Target:            target,
+			Headers:           headers,
+			SigningSecret:     r.SigningSecret,
+			PreserveHost:      r.PreserveHost,
+			PassthroughErrors: r.PassthroughErrors,
+			RoleIDs:           roleSet,
 		}
 	}
 	c.byDomain = next

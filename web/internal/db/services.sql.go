@@ -23,18 +23,19 @@ func (q *Queries) CountServices(ctx context.Context) (int64, error) {
 }
 
 const createService = `-- name: CreateService :one
-INSERT INTO services (title, description, service_url, domain, headers, preserve_host)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host
+INSERT INTO services (title, description, service_url, domain, headers, preserve_host, passthrough_errors)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host, passthrough_errors
 `
 
 type CreateServiceParams struct {
-	Title        string
-	Description  string
-	ServiceUrl   string
-	Domain       string
-	Headers      []byte
-	PreserveHost bool
+	Title             string
+	Description       string
+	ServiceUrl        string
+	Domain            string
+	Headers           []byte
+	PreserveHost      bool
+	PassthroughErrors bool
 }
 
 func (q *Queries) CreateService(ctx context.Context, arg CreateServiceParams) (Service, error) {
@@ -45,6 +46,7 @@ func (q *Queries) CreateService(ctx context.Context, arg CreateServiceParams) (S
 		arg.Domain,
 		arg.Headers,
 		arg.PreserveHost,
+		arg.PassthroughErrors,
 	)
 	var i Service
 	err := row.Scan(
@@ -58,6 +60,7 @@ func (q *Queries) CreateService(ctx context.Context, arg CreateServiceParams) (S
 		&i.UpdatedAt,
 		&i.SigningSecret,
 		&i.PreserveHost,
+		&i.PassthroughErrors,
 	)
 	return i, err
 }
@@ -72,7 +75,7 @@ func (q *Queries) DeleteService(ctx context.Context, id uuid.UUID) error {
 }
 
 const getServiceByDomain = `-- name: GetServiceByDomain :one
-SELECT id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host FROM services WHERE domain = $1
+SELECT id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host, passthrough_errors FROM services WHERE domain = $1
 `
 
 func (q *Queries) GetServiceByDomain(ctx context.Context, domain string) (Service, error) {
@@ -89,12 +92,13 @@ func (q *Queries) GetServiceByDomain(ctx context.Context, domain string) (Servic
 		&i.UpdatedAt,
 		&i.SigningSecret,
 		&i.PreserveHost,
+		&i.PassthroughErrors,
 	)
 	return i, err
 }
 
 const getServiceByID = `-- name: GetServiceByID :one
-SELECT id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host FROM services WHERE id = $1
+SELECT id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host, passthrough_errors FROM services WHERE id = $1
 `
 
 func (q *Queries) GetServiceByID(ctx context.Context, id uuid.UUID) (Service, error) {
@@ -111,12 +115,13 @@ func (q *Queries) GetServiceByID(ctx context.Context, id uuid.UUID) (Service, er
 		&i.UpdatedAt,
 		&i.SigningSecret,
 		&i.PreserveHost,
+		&i.PassthroughErrors,
 	)
 	return i, err
 }
 
 const listServices = `-- name: ListServices :many
-SELECT id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host FROM services
+SELECT id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host, passthrough_errors FROM services
 ORDER BY created_at ASC, id ASC
 LIMIT $2::int OFFSET $1::int
 `
@@ -146,6 +151,7 @@ func (q *Queries) ListServices(ctx context.Context, arg ListServicesParams) ([]S
 			&i.UpdatedAt,
 			&i.SigningSecret,
 			&i.PreserveHost,
+			&i.PassthroughErrors,
 		); err != nil {
 			return nil, err
 		}
@@ -162,7 +168,7 @@ UPDATE services
 SET signing_secret = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host
+RETURNING id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host, passthrough_errors
 `
 
 type RotateServiceSigningSecretParams struct {
@@ -184,6 +190,7 @@ func (q *Queries) RotateServiceSigningSecret(ctx context.Context, arg RotateServ
 		&i.UpdatedAt,
 		&i.SigningSecret,
 		&i.PreserveHost,
+		&i.PassthroughErrors,
 	)
 	return i, err
 }
@@ -196,19 +203,21 @@ SET title = $2,
     domain = $5,
     headers = $6,
     preserve_host = $7,
+    passthrough_errors = $8,
     updated_at = now()
 WHERE id = $1
-RETURNING id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host
+RETURNING id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host, passthrough_errors
 `
 
 type UpdateServiceParams struct {
-	ID           uuid.UUID
-	Title        string
-	Description  string
-	ServiceUrl   string
-	Domain       string
-	Headers      []byte
-	PreserveHost bool
+	ID                uuid.UUID
+	Title             string
+	Description       string
+	ServiceUrl        string
+	Domain            string
+	Headers           []byte
+	PreserveHost      bool
+	PassthroughErrors bool
 }
 
 func (q *Queries) UpdateService(ctx context.Context, arg UpdateServiceParams) (Service, error) {
@@ -220,6 +229,7 @@ func (q *Queries) UpdateService(ctx context.Context, arg UpdateServiceParams) (S
 		arg.Domain,
 		arg.Headers,
 		arg.PreserveHost,
+		arg.PassthroughErrors,
 	)
 	var i Service
 	err := row.Scan(
@@ -233,6 +243,7 @@ func (q *Queries) UpdateService(ctx context.Context, arg UpdateServiceParams) (S
 		&i.UpdatedAt,
 		&i.SigningSecret,
 		&i.PreserveHost,
+		&i.PassthroughErrors,
 	)
 	return i, err
 }

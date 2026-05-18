@@ -43,15 +43,16 @@ func SnapshotService(s db.Service) map[string]any {
 		}
 	}
 	return map[string]any{
-		"id":            s.ID.String(),
-		"title":         s.Title,
-		"description":   s.Description,
-		"service_url":   s.ServiceUrl,
-		"domain":        s.Domain,
-		"headers":       headers,
-		"preserve_host": s.PreserveHost,
-		"created_at":    TimestamptzToString(s.CreatedAt),
-		"updated_at":    TimestamptzToString(s.UpdatedAt),
+		"id":                 s.ID.String(),
+		"title":              s.Title,
+		"description":        s.Description,
+		"service_url":        s.ServiceUrl,
+		"domain":             s.Domain,
+		"headers":            headers,
+		"preserve_host":      s.PreserveHost,
+		"passthrough_errors": s.PassthroughErrors,
+		"created_at":         TimestamptzToString(s.CreatedAt),
+		"updated_at":         TimestamptzToString(s.UpdatedAt),
 	}
 }
 

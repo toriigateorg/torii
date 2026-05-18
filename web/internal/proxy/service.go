@@ -113,7 +113,7 @@ func ProxyTo(svc *CachedService, ident Identity, c *echo.Context) error {
 		}
 	}
 	rp.ModifyResponse = func(resp *http.Response) error {
-		if resp.StatusCode >= 500 {
+		if resp.StatusCode >= 500 && !svc.PassthroughErrors {
 			return replaceWithUpstreamError(resp)
 		}
 		return injectOverlay(resp)
