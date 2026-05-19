@@ -35,7 +35,7 @@ async function onSignout() {
             class="size-7 rounded-md"
           />
           <span class="font-semibold tracking-tight">torii</span>
-          <span class="text-mono-label hidden sm:inline ml-2">v0.1</span>
+          <span class="text-mono-label hidden sm:inline ml-2">v{{ useToriiVersion() }}</span>
         </NuxtLink>
 
         <div class="flex items-center gap-2">

@@ -9,14 +9,16 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"torii/cmd"
+	"torii/internal/version"
 )
 
 func main() {
 	_ = godotenv.Load()
 
 	app := &cli.Command{
-		Name:  "torii",
-		Usage: "torii server and tooling",
+		Name:    "torii",
+		Usage:   "torii server and tooling",
+		Version: version.Version,
 		Commands: []*cli.Command{
 			cmd.Serve(),
 			cmd.Migrate(),

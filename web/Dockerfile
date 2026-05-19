@@ -14,6 +14,9 @@ COPY client/ ./
 # Public site URL baked into prerendered HTML (canonical, og:url, sitemap).
 ARG SITE_URL=https://toriigate.org
 ENV SITE_URL=${SITE_URL}
+# Release version surfaced in the navbar (runtimeConfig.public.toriiVersion).
+ARG TORII_VERSION=dev
+ENV TORII_VERSION=${TORII_VERSION}
 RUN bun run generate
 
 # ---------- Stage 2: build the Go binary with the SPA embedded ----------
@@ -31,9 +34,15 @@ COPY . .
 RUN rm -rf internal/web/dist && mkdir -p internal/web/dist
 COPY --from=client /app/client/.output/public/ ./internal/web/dist/
 
+# Release version baked into the binary; surfaced via `torii --version` and
+# the /_torii/api/v1/health JSON.
+ARG TORII_VERSION=dev
+
 # Static, stripped binary.
 ENV CGO_ENABLED=0 GOOS=linux
-RUN go build -trimpath -ldflags='-s -w' -o /out/torii .
+RUN go build -trimpath \
+    -ldflags="-s -w -X torii/internal/version.Version=${TORII_VERSION}" \
+    -o /out/torii .
 
 # ---------- Stage 3: minimal runtime ----------
 FROM alpine:3.20

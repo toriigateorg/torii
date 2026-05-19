@@ -11,6 +11,7 @@ export default defineNuxtConfig({
   runtimeConfig: {
     public: {
       toriiUrl: process.env.TORII_URL ?? "",
+      toriiVersion: process.env.TORII_VERSION ?? "dev",
       siteUrl: process.env.SITE_URL ?? "https://toriigate.org",
     },
   },

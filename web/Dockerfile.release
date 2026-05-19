@@ -1,0 +1,25 @@
+# Slim runtime image consumed by goreleaser's docker step. goreleaser builds
+# the static Go binary itself (with the SPA and SQL migrations already
+# embedded) and stages it into the build context as `torii`.
+#
+# The full multi-stage build (Dockerfile, used by `docker compose build`) is
+# retained for local/dev workflows.
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates tzdata \
+    && addgroup -g 10001 -S torii \
+    && adduser  -u 10001 -S torii -G torii
+
+WORKDIR /app
+
+COPY torii /usr/local/bin/torii
+
+RUN mkdir -p /app/logs && chown torii:torii /app/logs
+
+USER torii
+EXPOSE 1356
+
+ENV APP_ENV=production
+
+ENTRYPOINT ["torii"]
+CMD ["serve", "--migrate"]

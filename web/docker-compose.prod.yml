@@ -4,6 +4,8 @@ services:
     build:
       context: ./
       dockerfile: Dockerfile
+      args:
+        TORII_VERSION: ${TORII_VERSION:-dev}
     image: codingcoffee/torii:latest
     ports:
       - "1356:1356"

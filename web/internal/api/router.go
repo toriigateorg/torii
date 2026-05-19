@@ -14,6 +14,7 @@ import (
 	"torii/internal/config"
 	"torii/internal/db"
 	"torii/internal/proxy"
+	"torii/internal/version"
 )
 
 // SessionRefresher rotates the caller's session using the refresh cookie,
@@ -30,7 +31,10 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	v1 := e.Group("/_torii/api/v1")
 
 	v1.GET("/health", func(c *echo.Context) error {
-		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+		return c.JSON(http.StatusOK, map[string]string{
+			"status":  "ok",
+			"version": version.Version,
+		})
 	})
 
 	v1.GET("/ht/", func(c *echo.Context) error {

@@ -1,0 +1,37 @@
+# Self-contained release runner. Bakes the exact Go + bun + goreleaser +
+# docker-cli versions used in our pipeline so the only thing the host needs
+# is a docker daemon (the socket is bind-mounted in at run time).
+#
+# Build:  docker build -f Dockerfile.releaser -t torii-releaser:latest .
+# Run:    invoked by `just release` — see justfile.
+FROM golang:1.26.2-alpine
+
+ARG GORELEASER_VERSION=2.4.4
+ARG BUN_VERSION=1.3.13
+
+RUN apk add --no-cache \
+        bash \
+        ca-certificates \
+        curl \
+        docker-cli \
+        git \
+        libgcc \
+        libstdc++ \
+        unzip
+
+# bun — needed by goreleaser's before-hooks to build the embedded Nuxt SPA.
+RUN curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}" \
+    && mv /root/.bun/bin/bun /usr/local/bin/bun \
+    && bun --version
+
+# goreleaser pinned to a known version so release output is reproducible.
+RUN curl -sfL "https://github.com/goreleaser/goreleaser/releases/download/v${GORELEASER_VERSION}/goreleaser_Linux_x86_64.tar.gz" \
+        | tar -xzC /usr/local/bin goreleaser \
+    && goreleaser --version
+
+# The bind-mounted repo is owned by the host user, not container root, so git
+# refuses to read it without this allowlist.
+RUN git config --global --add safe.directory /workspace
+
+WORKDIR /workspace
+ENTRYPOINT ["goreleaser"]

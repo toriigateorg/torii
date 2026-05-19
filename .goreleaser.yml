@@ -1,0 +1,85 @@
+version: 2
+
+project_name: torii
+
+before:
+  hooks:
+    - sh -c "cd web/client && bun install --frozen-lockfile"
+    # TORII_VERSION (set by `just release`) is read by nuxt.config.ts via
+    # process.env so the navbar reflects the release tag.
+    - sh -c "cd web/client && bun run generate"
+    - sh -c "rm -rf web/internal/web/dist && mkdir -p web/internal/web/dist"
+    - sh -c "cp -r web/client/.output/public/. web/internal/web/dist/"
+
+builds:
+  - id: torii
+    dir: web
+    main: .
+    binary: torii
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X torii/internal/version.Version={{.Version}}
+
+archives:
+  - id: torii
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - "^chore:"
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "Merge pull request"
+      - "Merge branch"
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))?:'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\(.+\))?:'
+      order: 1
+    - title: Other
+      order: 999
+
+dockers:
+  - image_templates:
+      - "codingcoffee/torii:{{ .Version }}"
+      - "codingcoffee/torii:latest"
+    dockerfile: web/Dockerfile.release
+    use: docker
+    goos: linux
+    goarch: amd64
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.source=https://github.com/toriigateorg/torii"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+
+release:
+  github:
+    owner: toriigateorg
+    name: torii
+  name_template: "v{{ .Version }}"
+  draft: false
+  prerelease: auto
