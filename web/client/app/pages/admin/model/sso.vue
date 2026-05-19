@@ -257,7 +257,7 @@ async function confirmDelete() {
       </Table>
     </div>
 
-    <PaginationBar
+    <AdminPaginationBar
       :page="page"
       :page-size="pageSize"
       :total="total"

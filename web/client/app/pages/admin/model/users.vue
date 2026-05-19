@@ -8,9 +8,16 @@ useSeoMeta({ title: "Admin · Users — torii", robots: "noindex, nofollow" })
 
 const { user: currentUser } = useAuth()
 const api = useAdminApi()
+const route = useRoute()
+const router = useRouter()
+
+function pageFromQuery(q: unknown): number {
+  const n = Number.parseInt(Array.isArray(q) ? q[0] ?? "" : (q as string) ?? "", 10)
+  return Number.isFinite(n) && n > 0 ? n : 1
+}
 
 const items = ref<AuthUser[]>([])
-const page = ref(1)
+const page = ref(pageFromQuery(route.query.page))
 const pageSize = ref(20)
 const total = ref(0)
 const loading = ref(false)
@@ -53,7 +60,20 @@ async function load() {
   }
 }
 
-watch(page, load)
+watch(page, (p) => {
+  const current = pageFromQuery(route.query.page)
+  if (current !== p) {
+    const query = { ...route.query }
+    if (p === 1) delete query.page
+    else query.page = String(p)
+    router.replace({ query })
+  }
+  load()
+})
+watch(() => route.query.page, (q) => {
+  const p = pageFromQuery(q)
+  if (p !== page.value) page.value = p
+})
 onMounted(load)
 
 function resetCreate() {
@@ -229,7 +249,7 @@ async function toggleRole(role: Role) {
       </Table>
     </div>
 
-    <PaginationBar
+    <AdminPaginationBar
       :page="page"
       :page-size="pageSize"
       :total="total"

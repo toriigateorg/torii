@@ -158,7 +158,7 @@ function fmt(ts: string | null) {
       </Table>
     </div>
 
-    <PaginationBar
+    <AdminPaginationBar
       :page="page"
       :page-size="pageSize"
       :total="total"

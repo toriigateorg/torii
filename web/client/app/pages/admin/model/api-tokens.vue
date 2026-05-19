@@ -200,7 +200,7 @@ function isExpired(t: APIToken): boolean {
       </Table>
     </div>
 
-    <PaginationBar
+    <AdminPaginationBar
       :page="page"
       :page-size="pageSize"
       :total="total"
