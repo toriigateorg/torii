@@ -424,6 +424,9 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logg
 							},
 						})
 					}
+					if isDocumentRequest(c.Request()) {
+						return c.Redirect(http.StatusFound, "/_torii/forbidden?service="+url.QueryEscape(svc.Title))
+					}
 					return c.JSON(http.StatusForbidden, map[string]string{"error": "forbidden: no role grants access to this service"})
 				}
 				if auditor != nil {
