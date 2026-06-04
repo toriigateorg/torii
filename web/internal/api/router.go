@@ -70,6 +70,12 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	// The SPA legitimately bursts these on page reloads (bootstrap → /me →
 	// 401 → /token_refresh) and across multiple tabs.
 	refreshLimiter := rateLimit(rate.Every(time.Second), 30)
+	// ssoLimiter: OAuth start/callback don't run argon2 and the callback is
+	// gated by a torii-issued state token, so they don't need credential-
+	// stuffing-grade limits. They legitimately burst: the SPA does silent
+	// prompt=none re-auth, and cross-domain login re-runs the flow once per
+	// service domain a user opens. Only a DoS cap is needed.
+	ssoLimiter := rateLimit(rate.Every(time.Second), 30)
 	v1.POST("/signup", h.signup, authLimiter)
 	v1.POST("/signin", h.signin, authLimiter)
 	v1.POST("/token_refresh", h.tokenRefresh, refreshLimiter)
@@ -146,8 +152,8 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 
 	v1.GET("/auth/config", h.publicAuthConfig)
 	v1.GET("/auth/providers", h.publicListProviders)
-	v1.GET("/oauth/:slug/start", h.oauthStart, authLimiter)
-	v1.GET("/oauth/:slug/callback", h.oauthCallback, authLimiter)
+	v1.GET("/oauth/:slug/start", h.oauthStart, ssoLimiter)
+	v1.GET("/oauth/:slug/callback", h.oauthCallback, ssoLimiter)
 	// Cross-host SSO handoff: lands on a service domain, exchanges a
 	// short-lived torii-signed token for cookies on that host. Reachable
 	// on any host because that's the whole point.
