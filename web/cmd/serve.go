@@ -160,7 +160,6 @@ func runInner(ctx context.Context, host string, port int) error {
 		configureIPExtractor(e, cfg.TrustedProxyCIDRs)
 	}
 	e.Use(middleware.RequestLogger())
-	e.Use(middleware.BodyLimit(1 << 20))
 	e.Use(securityHeaders(cfg))
 
 	var cache *proxy.ServiceCache

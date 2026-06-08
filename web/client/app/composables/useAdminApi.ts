@@ -45,6 +45,7 @@ export interface Service {
   headers: Record<string, string>
   preserve_host: boolean
   passthrough_errors: boolean
+  max_body_size: number
   created_at: string
   updated_at: string
 }
@@ -68,6 +69,7 @@ export interface ServicePayload {
   headers: Record<string, string>
   preserve_host: boolean
   passthrough_errors: boolean
+  max_body_size: number
 }
 
 export interface Role {

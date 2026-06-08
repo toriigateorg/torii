@@ -1,0 +1,2 @@
+ALTER TABLE services
+    ADD COLUMN max_body_size BIGINT NOT NULL DEFAULT 1048576;

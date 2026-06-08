@@ -23,7 +23,10 @@ type CachedService struct {
 	SigningSecret     []byte
 	PreserveHost      bool
 	PassthroughErrors bool
-	RoleIDs           map[uuid.UUID]struct{}
+	// MaxBodySize caps the request body torii will forward to this upstream,
+	// in bytes. 0 means no torii-imposed limit.
+	MaxBodySize int64
+	RoleIDs     map[uuid.UUID]struct{}
 }
 
 func (s *CachedService) AllowsAnyRole(roleIDs []uuid.UUID) bool {
@@ -118,6 +121,7 @@ func (c *ServiceCache) refreshLocked(ctx context.Context) {
 			SigningSecret:     r.SigningSecret,
 			PreserveHost:      r.PreserveHost,
 			PassthroughErrors: r.PassthroughErrors,
+			MaxBodySize:       r.MaxBodySize,
 			RoleIDs:           roleSet,
 		}
 	}

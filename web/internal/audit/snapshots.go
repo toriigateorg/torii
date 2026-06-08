@@ -51,6 +51,7 @@ func SnapshotService(s db.Service) map[string]any {
 		"headers":            headers,
 		"preserve_host":      s.PreserveHost,
 		"passthrough_errors": s.PassthroughErrors,
+		"max_body_size":      s.MaxBodySize,
 		"created_at":         TimestamptzToString(s.CreatedAt),
 		"updated_at":         TimestamptzToString(s.UpdatedAt),
 	}

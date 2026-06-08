@@ -123,6 +123,7 @@ SELECT
     s.signing_secret,
     s.preserve_host,
     s.passthrough_errors,
+    s.max_body_size,
     s.created_at,
     s.updated_at,
     COALESCE(

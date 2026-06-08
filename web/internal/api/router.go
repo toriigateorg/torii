@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v5/middleware"
 	"golang.org/x/time/rate"
 
 	"torii/internal/audit"
@@ -28,7 +29,10 @@ type SessionRefresher interface {
 // Register mounts the /_torii/api/v1 routes on the given echo instance and
 // returns a SessionRefresher (nil when no DB pool / config is wired).
 func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logger) SessionRefresher {
-	v1 := e.Group("/_torii/api/v1")
+	// torii's own control-plane API only ever takes small JSON payloads, so
+	// keep it pinned at 1 MiB. Proxied upstream traffic is NOT mounted here —
+	// it's governed per-service via Service.MaxBodySize in the proxy path.
+	v1 := e.Group("/_torii/api/v1", middleware.BodyLimit(1<<20))
 
 	v1.GET("/health", func(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{

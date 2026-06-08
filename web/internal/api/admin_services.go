@@ -63,6 +63,7 @@ type serviceDTO struct {
 	Headers           map[string]string `json:"headers"`
 	PreserveHost      bool              `json:"preserve_host"`
 	PassthroughErrors bool              `json:"passthrough_errors"`
+	MaxBodySize       int64             `json:"max_body_size"`
 	CreatedAt         string            `json:"created_at"`
 	UpdatedAt         string            `json:"updated_at"`
 }
@@ -80,6 +81,22 @@ type adminServiceReq struct {
 	Headers           map[string]string `json:"headers"`
 	PreserveHost      bool              `json:"preserve_host"`
 	PassthroughErrors *bool             `json:"passthrough_errors"`
+	MaxBodySize       *int64            `json:"max_body_size"`
+}
+
+// maxBodySizeCeiling bounds the per-service request-body cap. It's generous
+// (5 GiB) — high enough for any realistic upload while rejecting fat-finger or
+// hostile values that would let a single request exhaust memory/disk upstream.
+const maxBodySizeCeiling = 5 << 30
+
+// maxBodySize defaults to 1 MiB when the caller omits the field, matching the
+// torii control-plane limit so legacy API clients that don't know about this
+// field keep today's behavior rather than getting an unbounded body.
+func (r *adminServiceReq) maxBodySize() int64 {
+	if r.MaxBodySize == nil {
+		return 1 << 20
+	}
+	return *r.MaxBodySize
 }
 
 // passthroughErrors defaults to true when the caller omits the field, so legacy
@@ -106,6 +123,7 @@ func toServiceDTO(s db.Service) serviceDTO {
 		Headers:           headers,
 		PreserveHost:      s.PreserveHost,
 		PassthroughErrors: s.PassthroughErrors,
+		MaxBodySize:       s.MaxBodySize,
 		CreatedAt:         tsString(s.CreatedAt),
 		UpdatedAt:         tsString(s.UpdatedAt),
 	}
@@ -138,6 +156,9 @@ func (h *authHandlers) validateServiceReq(req *adminServiceReq) (headersJSON []b
 	}
 	if err := netutil.IsSafeUpstreamHost(u.Host, h.cfg.BlockLoopbackUpstreams); err != nil {
 		return nil, "service_url rejected: " + err.Error()
+	}
+	if req.MaxBodySize != nil && (*req.MaxBodySize < 0 || *req.MaxBodySize > maxBodySizeCeiling) {
+		return nil, "max_body_size must be between 0 (unlimited) and 5368709120 (5 GiB)"
 	}
 	if req.Headers == nil {
 		req.Headers = map[string]string{}
@@ -193,6 +214,7 @@ func (h *authHandlers) adminCreateService(c *echo.Context) error {
 		Headers:           headers,
 		PreserveHost:      req.PreserveHost,
 		PassthroughErrors: req.passthroughErrors(),
+		MaxBodySize:       req.maxBodySize(),
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -240,6 +262,7 @@ func (h *authHandlers) adminUpdateService(c *echo.Context) error {
 		Headers:           headers,
 		PreserveHost:      req.PreserveHost,
 		PassthroughErrors: req.passthroughErrors(),
+		MaxBodySize:       req.maxBodySize(),
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError

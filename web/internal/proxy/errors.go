@@ -138,6 +138,9 @@ func errorCopy(status int) (label, title, blurb string) {
 	case http.StatusInternalServerError:
 		return "upstream error", "Something went wrong on the service side",
 			"The service behind this domain returned an internal error. Contact your administrator if this keeps happening."
+	case http.StatusRequestEntityTooLarge:
+		return "request too large", "Your upload exceeds the size limit",
+			"The request body is larger than the maximum size allowed for this service. Contact your administrator if you need the limit raised."
 	default:
 		return "upstream error", "Something went wrong",
 			"The service behind this domain returned an error. Contact your administrator if this keeps happening."

@@ -35,8 +35,19 @@ const form = ref<ServicePayload>({
   headers: {},
   preserve_host: false,
   passthrough_errors: true,
+  max_body_size: 1048576,
 })
 const headerRows = ref<HeaderRow[]>([])
+
+// The API stores max_body_size in bytes; the form edits megabytes (1 MiB =
+// 1048576 bytes) since that's the human-friendly unit. 0 means unlimited.
+const BYTES_PER_MB = 1024 * 1024
+const maxBodySizeMB = computed({
+  get: () => Math.round((form.value.max_body_size / BYTES_PER_MB) * 100) / 100,
+  set: (v: number) => {
+    form.value.max_body_size = Math.max(0, Math.round((Number(v) || 0) * BYTES_PER_MB))
+  },
+})
 
 const deleteTarget = ref<Service | null>(null)
 const deleting = ref(false)
@@ -87,7 +98,7 @@ watch(page, load)
 onMounted(load)
 
 function resetForm() {
-  form.value = { title: "", description: "", service_url: "", domain: "", headers: {}, preserve_host: false, passthrough_errors: true }
+  form.value = { title: "", description: "", service_url: "", domain: "", headers: {}, preserve_host: false, passthrough_errors: true, max_body_size: 1048576 }
   headerRows.value = []
   formError.value = null
   editTargetId.value = null
@@ -110,6 +121,7 @@ function openEdit(svc: Service) {
     headers: { ...svc.headers },
     preserve_host: svc.preserve_host,
     passthrough_errors: svc.passthrough_errors,
+    max_body_size: svc.max_body_size,
   }
   headerRows.value = Object.entries(svc.headers).map(([key, value]) => ({ key, value }))
   formError.value = null
@@ -146,6 +158,9 @@ function validate(): string | null {
   if (!(parsed.pathname === "" || parsed.pathname === "/") || parsed.search || parsed.hash) {
     return "service_url must not contain a path, query, or fragment"
   }
+  if (form.value.max_body_size < 0 || form.value.max_body_size > 5 * 1024 * 1024 * 1024) {
+    return "max request body size must be between 0 (unlimited) and 5 GiB"
+  }
   return null
 }
 
@@ -163,6 +178,7 @@ async function submit() {
       headers: collectHeaders(),
       preserve_host: form.value.preserve_host,
       passthrough_errors: form.value.passthrough_errors,
+      max_body_size: form.value.max_body_size,
     }
     if (formMode.value === "create") {
       await api.createService(payload)
@@ -418,6 +434,23 @@ async function confirmDelete() {
                 replace upstream 5xx responses with torii's generic error page.
               </p>
             </div>
+          </div>
+
+          <div class="flex flex-col gap-1.5">
+            <Label for="svc-max-body">Max request body size (MB)</Label>
+            <Input
+              id="svc-max-body"
+              v-model.number="maxBodySizeMB"
+              type="number"
+              min="0"
+              step="0.1"
+              placeholder="1"
+            />
+            <p class="text-xs text-muted-foreground leading-relaxed">
+              Largest request body torii will forward to this upstream. Raise it for
+              services that accept file uploads. Set to <span class="font-mono">0</span>
+              for no limit. torii's own API stays capped at 1 MB regardless.
+            </p>
           </div>
 
           <p

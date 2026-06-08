@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/http/httputil"
 	"strconv"
@@ -47,6 +48,14 @@ func ProxyTo(svc *CachedService, ident Identity, c *echo.Context) error {
 	origProto := "http"
 	if inbound.TLS != nil || strings.EqualFold(inbound.Header.Get("X-Forwarded-Proto"), "https") {
 		origProto = "https"
+	}
+
+	// Cap the request body torii forwards upstream. The control-plane API
+	// keeps its own 1 MiB limit (see router.go); proxied traffic is governed
+	// per-service so large uploads only flow to services that opt in. 0 means
+	// no torii-imposed limit.
+	if svc.MaxBodySize > 0 && inbound.Body != nil {
+		inbound.Body = http.MaxBytesReader(c.Response(), inbound.Body, svc.MaxBodySize)
 	}
 
 	rp := httputil.NewSingleHostReverseProxy(svc.Target)
@@ -118,7 +127,12 @@ func ProxyTo(svc *CachedService, ident Identity, c *echo.Context) error {
 		}
 		return injectOverlay(resp)
 	}
-	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, _ error) {
+	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			renderUpstreamError(w, r, http.StatusRequestEntityTooLarge)
+			return
+		}
 		renderUpstreamError(w, r, http.StatusBadGateway)
 	}
 	rp.ServeHTTP(c.Response(), c.Request())

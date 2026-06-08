@@ -81,6 +81,7 @@ type Service struct {
 	SigningSecret     []byte
 	PreserveHost      bool
 	PassthroughErrors bool
+	MaxBodySize       int64
 }
 
 type SsoProvider struct {
