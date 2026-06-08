@@ -1,9 +1,17 @@
 services:
-  nginx: # a sample service to test proxy pass
+  nginx: # a sample service to test proxy pass (and file uploads)
     restart: unless-stopped
     image: nginx:1.29.8-alpine3.23
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx-upload.html:/usr/share/nginx/html/upload.html:ro
+      # /tmp is tmpfs so uploaded files (under /tmp/uploads) live only in
+      # memory and are wiped whenever the container restarts. Sticky 1777 so
+      # the nginx worker can create the upload + body-temp dirs.
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          mode: 01777
 
   app:
     restart: unless-stopped

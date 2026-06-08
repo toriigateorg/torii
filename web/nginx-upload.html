@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>torii upload test</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 3rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.25rem; }
+  .row { display: flex; gap: .5rem; align-items: center; margin: 1rem 0; }
+  button { padding: .5rem 1rem; cursor: pointer; }
+  pre { background: #f4f4f5; padding: 1rem; border-radius: 6px; white-space: pre-wrap; word-break: break-all; }
+  a { color: #2563eb; }
+</style>
+</head>
+<body>
+<h1>Upload test (behind torii)</h1>
+<p>Served by the sample nginx upstream. Files are stored in <code>/tmp/uploads/</code> inside the container and wiped on restart.</p>
+<div class="row">
+  <input type="file" id="file-input">
+  <button type="button" id="upload-btn">Upload</button>
+</div>
+<p><a href="/uploads/">browse stored uploads</a></p>
+<pre id="out">no upload yet</pre>
+<script>
+  const input = document.getElementById("file-input");
+  const out = document.getElementById("out");
+
+  document.getElementById("upload-btn").addEventListener("click", async () => {
+    const file = input.files[0];
+    if (!file) {
+      out.textContent = "pick a file first";
+      return;
+    }
+    out.textContent = "uploading " + file.name + " (" + file.size + " bytes) ...";
+    try {
+      const res = await fetch("/uploads/" + encodeURIComponent(file.name), {
+        method: "PUT",
+        body: file,
+        credentials: "include",
+      });
+      const body = await res.text();
+      out.textContent = "HTTP " + res.status + "\n" + body + "\nstored at /uploads/" + file.name;
+    } catch (e) {
+      out.textContent = "error: " + e;
+    }
+  });
+</script>
+</body>
+</html>
