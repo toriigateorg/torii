@@ -82,6 +82,9 @@ type Service struct {
 	PreserveHost      bool
 	PassthroughErrors bool
 	MaxBodySize       int64
+	ReadTimeoutSecs   int32
+	WriteTimeoutSecs  int32
+	DialTimeoutSecs   int32
 }
 
 type SsoProvider struct {

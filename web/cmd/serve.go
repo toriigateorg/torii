@@ -159,7 +159,21 @@ func runInner(ctx context.Context, host string, port int) error {
 	if cfg != nil {
 		configureIPExtractor(e, cfg.TrustedProxyCIDRs)
 	}
+	const (
+		defaultReadTimeout  = 30 * time.Second
+		defaultWriteTimeout = 60 * time.Second
+	)
 	e.Use(middleware.RequestLogger())
+	// Server-level ReadTimeout/WriteTimeout are disabled below so they can be
+	// set per-request (and overridden per-service in the proxy dispatch). This
+	// applies the defaults to every request; proxied requests override them
+	// from the service config.
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			proxy.SetDeadlines(c.Response(), defaultReadTimeout, defaultWriteTimeout)
+			return next(c)
+		}
+	})
 	e.Use(securityHeaders(cfg))
 
 	var cache *proxy.ServiceCache
@@ -201,10 +215,15 @@ func runInner(ctx context.Context, host string, port int) error {
 		Addr:              fmt.Sprintf("%s:%d", host, port),
 		Handler:           e,
 		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      60 * time.Second,
-		IdleTimeout:       120 * time.Second,
-		MaxHeaderBytes:    1 << 20,
+		// ReadTimeout / WriteTimeout are intentionally 0 (disabled) here. They
+		// can't be per-service at the server level, so they're applied as
+		// per-request deadlines (defaults via middleware, overridden per
+		// service in proxy.ProxyTo). ReadHeaderTimeout and IdleTimeout remain
+		// connection-level and global.
+		ReadTimeout:    0,
+		WriteTimeout:   0,
+		IdleTimeout:    120 * time.Second,
+		MaxHeaderBytes: 1 << 20,
 	}
 
 	serverErr := make(chan error, 1)

@@ -1,0 +1,4 @@
+ALTER TABLE services
+    ADD COLUMN read_timeout_secs  INTEGER NOT NULL DEFAULT 30,
+    ADD COLUMN write_timeout_secs INTEGER NOT NULL DEFAULT 60,
+    ADD COLUMN dial_timeout_secs  INTEGER NOT NULL DEFAULT 30;

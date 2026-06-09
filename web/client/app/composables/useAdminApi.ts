@@ -46,6 +46,9 @@ export interface Service {
   preserve_host: boolean
   passthrough_errors: boolean
   max_body_size: number
+  read_timeout_secs: number
+  write_timeout_secs: number
+  dial_timeout_secs: number
   created_at: string
   updated_at: string
 }
@@ -70,6 +73,9 @@ export interface ServicePayload {
   preserve_host: boolean
   passthrough_errors: boolean
   max_body_size: number
+  read_timeout_secs: number
+  write_timeout_secs: number
+  dial_timeout_secs: number
 }
 
 export interface Role {

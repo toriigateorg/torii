@@ -23,9 +23,9 @@ func (q *Queries) CountServices(ctx context.Context) (int64, error) {
 }
 
 const createService = `-- name: CreateService :one
-INSERT INTO services (title, description, service_url, domain, headers, preserve_host, passthrough_errors, max_body_size)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host, passthrough_errors, max_body_size
+INSERT INTO services (title, description, service_url, domain, headers, preserve_host, passthrough_errors, max_body_size, read_timeout_secs, write_timeout_secs, dial_timeout_secs)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+RETURNING id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host, passthrough_errors, max_body_size, read_timeout_secs, write_timeout_secs, dial_timeout_secs
 `
 
 type CreateServiceParams struct {
@@ -37,6 +37,9 @@ type CreateServiceParams struct {
 	PreserveHost      bool
 	PassthroughErrors bool
 	MaxBodySize       int64
+	ReadTimeoutSecs   int32
+	WriteTimeoutSecs  int32
+	DialTimeoutSecs   int32
 }
 
 func (q *Queries) CreateService(ctx context.Context, arg CreateServiceParams) (Service, error) {
@@ -49,6 +52,9 @@ func (q *Queries) CreateService(ctx context.Context, arg CreateServiceParams) (S
 		arg.PreserveHost,
 		arg.PassthroughErrors,
 		arg.MaxBodySize,
+		arg.ReadTimeoutSecs,
+		arg.WriteTimeoutSecs,
+		arg.DialTimeoutSecs,
 	)
 	var i Service
 	err := row.Scan(
@@ -64,6 +70,9 @@ func (q *Queries) CreateService(ctx context.Context, arg CreateServiceParams) (S
 		&i.PreserveHost,
 		&i.PassthroughErrors,
 		&i.MaxBodySize,
+		&i.ReadTimeoutSecs,
+		&i.WriteTimeoutSecs,
+		&i.DialTimeoutSecs,
 	)
 	return i, err
 }
@@ -78,7 +87,7 @@ func (q *Queries) DeleteService(ctx context.Context, id uuid.UUID) error {
 }
 
 const getServiceByDomain = `-- name: GetServiceByDomain :one
-SELECT id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host, passthrough_errors, max_body_size FROM services WHERE domain = $1
+SELECT id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host, passthrough_errors, max_body_size, read_timeout_secs, write_timeout_secs, dial_timeout_secs FROM services WHERE domain = $1
 `
 
 func (q *Queries) GetServiceByDomain(ctx context.Context, domain string) (Service, error) {
@@ -97,12 +106,15 @@ func (q *Queries) GetServiceByDomain(ctx context.Context, domain string) (Servic
 		&i.PreserveHost,
 		&i.PassthroughErrors,
 		&i.MaxBodySize,
+		&i.ReadTimeoutSecs,
+		&i.WriteTimeoutSecs,
+		&i.DialTimeoutSecs,
 	)
 	return i, err
 }
 
 const getServiceByID = `-- name: GetServiceByID :one
-SELECT id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host, passthrough_errors, max_body_size FROM services WHERE id = $1
+SELECT id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host, passthrough_errors, max_body_size, read_timeout_secs, write_timeout_secs, dial_timeout_secs FROM services WHERE id = $1
 `
 
 func (q *Queries) GetServiceByID(ctx context.Context, id uuid.UUID) (Service, error) {
@@ -121,12 +133,15 @@ func (q *Queries) GetServiceByID(ctx context.Context, id uuid.UUID) (Service, er
 		&i.PreserveHost,
 		&i.PassthroughErrors,
 		&i.MaxBodySize,
+		&i.ReadTimeoutSecs,
+		&i.WriteTimeoutSecs,
+		&i.DialTimeoutSecs,
 	)
 	return i, err
 }
 
 const listServices = `-- name: ListServices :many
-SELECT id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host, passthrough_errors, max_body_size FROM services
+SELECT id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host, passthrough_errors, max_body_size, read_timeout_secs, write_timeout_secs, dial_timeout_secs FROM services
 ORDER BY created_at ASC, id ASC
 LIMIT $2::int OFFSET $1::int
 `
@@ -158,6 +173,9 @@ func (q *Queries) ListServices(ctx context.Context, arg ListServicesParams) ([]S
 			&i.PreserveHost,
 			&i.PassthroughErrors,
 			&i.MaxBodySize,
+			&i.ReadTimeoutSecs,
+			&i.WriteTimeoutSecs,
+			&i.DialTimeoutSecs,
 		); err != nil {
 			return nil, err
 		}
@@ -174,7 +192,7 @@ UPDATE services
 SET signing_secret = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host, passthrough_errors, max_body_size
+RETURNING id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host, passthrough_errors, max_body_size, read_timeout_secs, write_timeout_secs, dial_timeout_secs
 `
 
 type RotateServiceSigningSecretParams struct {
@@ -198,6 +216,9 @@ func (q *Queries) RotateServiceSigningSecret(ctx context.Context, arg RotateServ
 		&i.PreserveHost,
 		&i.PassthroughErrors,
 		&i.MaxBodySize,
+		&i.ReadTimeoutSecs,
+		&i.WriteTimeoutSecs,
+		&i.DialTimeoutSecs,
 	)
 	return i, err
 }
@@ -212,9 +233,12 @@ SET title = $2,
     preserve_host = $7,
     passthrough_errors = $8,
     max_body_size = $9,
+    read_timeout_secs = $10,
+    write_timeout_secs = $11,
+    dial_timeout_secs = $12,
     updated_at = now()
 WHERE id = $1
-RETURNING id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host, passthrough_errors, max_body_size
+RETURNING id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host, passthrough_errors, max_body_size, read_timeout_secs, write_timeout_secs, dial_timeout_secs
 `
 
 type UpdateServiceParams struct {
@@ -227,6 +251,9 @@ type UpdateServiceParams struct {
 	PreserveHost      bool
 	PassthroughErrors bool
 	MaxBodySize       int64
+	ReadTimeoutSecs   int32
+	WriteTimeoutSecs  int32
+	DialTimeoutSecs   int32
 }
 
 func (q *Queries) UpdateService(ctx context.Context, arg UpdateServiceParams) (Service, error) {
@@ -240,6 +267,9 @@ func (q *Queries) UpdateService(ctx context.Context, arg UpdateServiceParams) (S
 		arg.PreserveHost,
 		arg.PassthroughErrors,
 		arg.MaxBodySize,
+		arg.ReadTimeoutSecs,
+		arg.WriteTimeoutSecs,
+		arg.DialTimeoutSecs,
 	)
 	var i Service
 	err := row.Scan(
@@ -255,6 +285,9 @@ func (q *Queries) UpdateService(ctx context.Context, arg UpdateServiceParams) (S
 		&i.PreserveHost,
 		&i.PassthroughErrors,
 		&i.MaxBodySize,
+		&i.ReadTimeoutSecs,
+		&i.WriteTimeoutSecs,
+		&i.DialTimeoutSecs,
 	)
 	return i, err
 }

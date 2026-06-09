@@ -36,6 +36,9 @@ const form = ref<ServicePayload>({
   preserve_host: false,
   passthrough_errors: true,
   max_body_size: 1048576,
+  read_timeout_secs: 30,
+  write_timeout_secs: 60,
+  dial_timeout_secs: 30,
 })
 const headerRows = ref<HeaderRow[]>([])
 
@@ -98,7 +101,7 @@ watch(page, load)
 onMounted(load)
 
 function resetForm() {
-  form.value = { title: "", description: "", service_url: "", domain: "", headers: {}, preserve_host: false, passthrough_errors: true, max_body_size: 1048576 }
+  form.value = { title: "", description: "", service_url: "", domain: "", headers: {}, preserve_host: false, passthrough_errors: true, max_body_size: 1048576, read_timeout_secs: 30, write_timeout_secs: 60, dial_timeout_secs: 30 }
   headerRows.value = []
   formError.value = null
   editTargetId.value = null
@@ -122,6 +125,9 @@ function openEdit(svc: Service) {
     preserve_host: svc.preserve_host,
     passthrough_errors: svc.passthrough_errors,
     max_body_size: svc.max_body_size,
+    read_timeout_secs: svc.read_timeout_secs,
+    write_timeout_secs: svc.write_timeout_secs,
+    dial_timeout_secs: svc.dial_timeout_secs,
   }
   headerRows.value = Object.entries(svc.headers).map(([key, value]) => ({ key, value }))
   formError.value = null
@@ -161,6 +167,13 @@ function validate(): string | null {
   if (form.value.max_body_size < 0 || form.value.max_body_size > 5 * 1024 * 1024 * 1024) {
     return "max request body size must be between 0 (unlimited) and 5 GiB"
   }
+  for (const [label, v] of [
+    ["read timeout", form.value.read_timeout_secs],
+    ["write timeout", form.value.write_timeout_secs],
+    ["dial timeout", form.value.dial_timeout_secs],
+  ] as const) {
+    if (v < 0 || v > 3600) return `${label} must be between 0 (no timeout) and 3600 seconds`
+  }
   return null
 }
 
@@ -179,6 +192,9 @@ async function submit() {
       preserve_host: form.value.preserve_host,
       passthrough_errors: form.value.passthrough_errors,
       max_body_size: form.value.max_body_size,
+      read_timeout_secs: form.value.read_timeout_secs,
+      write_timeout_secs: form.value.write_timeout_secs,
+      dial_timeout_secs: form.value.dial_timeout_secs,
     }
     if (formMode.value === "create") {
       await api.createService(payload)
@@ -452,6 +468,27 @@ async function confirmDelete() {
               for no limit. torii's own API stays capped at 1 MB regardless.
             </p>
           </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div class="flex flex-col gap-1.5">
+              <Label for="svc-read-timeout">Read timeout (s)</Label>
+              <Input id="svc-read-timeout" v-model.number="form.read_timeout_secs" type="number" min="0" max="3600" placeholder="30" />
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <Label for="svc-write-timeout">Write timeout (s)</Label>
+              <Input id="svc-write-timeout" v-model.number="form.write_timeout_secs" type="number" min="0" max="3600" placeholder="60" />
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <Label for="svc-dial-timeout">Dial timeout (s)</Label>
+              <Input id="svc-dial-timeout" v-model.number="form.dial_timeout_secs" type="number" min="0" max="3600" placeholder="30" />
+            </div>
+          </div>
+          <p class="text-xs text-muted-foreground leading-relaxed -mt-2">
+            <span class="font-mono">Read</span>: max time to receive the full request (raise for large uploads).
+            <span class="font-mono">Write</span>: max time to send the response.
+            <span class="font-mono">Dial</span>: max time to connect to the upstream.
+            Set any to <span class="font-mono">0</span> for no limit.
+          </p>
 
           <p
             class="text-sm text-destructive min-h-[1.25rem]"

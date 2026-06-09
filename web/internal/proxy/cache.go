@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"sync"
@@ -26,7 +28,14 @@ type CachedService struct {
 	// MaxBodySize caps the request body torii will forward to this upstream,
 	// in bytes. 0 means no torii-imposed limit.
 	MaxBodySize int64
-	RoleIDs     map[uuid.UUID]struct{}
+	// ReadTimeout / WriteTimeout are per-request deadlines applied to the
+	// client<->torii connection while proxying to this service (0 = no
+	// deadline). Transport carries the upstream dial timeout. See
+	// refreshLocked for how they're derived from the *_secs columns.
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
+	Transport    *http.Transport
+	RoleIDs      map[uuid.UUID]struct{}
 }
 
 func (s *CachedService) AllowsAnyRole(roleIDs []uuid.UUID) bool {
@@ -112,6 +121,14 @@ func (c *ServiceCache) refreshLocked(ctx context.Context) {
 		for _, id := range r.RoleIds {
 			roleSet[id] = struct{}{}
 		}
+		// Build the transport once per refresh so connections to this upstream
+		// are pooled across requests. DialContext Timeout of 0 means no dial
+		// timeout.
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.DialContext = (&net.Dialer{
+			Timeout:   time.Duration(r.DialTimeoutSecs) * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext
 		next[r.Domain] = &CachedService{
 			ID:                r.ID,
 			Title:             r.Title,
@@ -122,6 +139,9 @@ func (c *ServiceCache) refreshLocked(ctx context.Context) {
 			PreserveHost:      r.PreserveHost,
 			PassthroughErrors: r.PassthroughErrors,
 			MaxBodySize:       r.MaxBodySize,
+			ReadTimeout:       time.Duration(r.ReadTimeoutSecs) * time.Second,
+			WriteTimeout:      time.Duration(r.WriteTimeoutSecs) * time.Second,
+			Transport:         tr,
 			RoleIDs:           roleSet,
 		}
 	}

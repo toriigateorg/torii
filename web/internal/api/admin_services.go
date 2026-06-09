@@ -64,6 +64,9 @@ type serviceDTO struct {
 	PreserveHost      bool              `json:"preserve_host"`
 	PassthroughErrors bool              `json:"passthrough_errors"`
 	MaxBodySize       int64             `json:"max_body_size"`
+	ReadTimeoutSecs   int32             `json:"read_timeout_secs"`
+	WriteTimeoutSecs  int32             `json:"write_timeout_secs"`
+	DialTimeoutSecs   int32             `json:"dial_timeout_secs"`
 	CreatedAt         string            `json:"created_at"`
 	UpdatedAt         string            `json:"updated_at"`
 }
@@ -82,6 +85,37 @@ type adminServiceReq struct {
 	PreserveHost      bool              `json:"preserve_host"`
 	PassthroughErrors *bool             `json:"passthrough_errors"`
 	MaxBodySize       *int64            `json:"max_body_size"`
+	ReadTimeoutSecs   *int32            `json:"read_timeout_secs"`
+	WriteTimeoutSecs  *int32            `json:"write_timeout_secs"`
+	DialTimeoutSecs   *int32            `json:"dial_timeout_secs"`
+}
+
+// timeoutCeiling bounds each per-service timeout (seconds). 0 means "no
+// timeout"; the ceiling guards against fat-finger values that would tie up a
+// connection indefinitely.
+const timeoutCeiling = 3600
+
+// Timeout helpers default to the same values as the global server defaults so
+// legacy API clients that omit them keep today's behavior.
+func (r *adminServiceReq) readTimeoutSecs() int32 {
+	if r.ReadTimeoutSecs == nil {
+		return 30
+	}
+	return *r.ReadTimeoutSecs
+}
+
+func (r *adminServiceReq) writeTimeoutSecs() int32 {
+	if r.WriteTimeoutSecs == nil {
+		return 60
+	}
+	return *r.WriteTimeoutSecs
+}
+
+func (r *adminServiceReq) dialTimeoutSecs() int32 {
+	if r.DialTimeoutSecs == nil {
+		return 30
+	}
+	return *r.DialTimeoutSecs
 }
 
 // maxBodySizeCeiling bounds the per-service request-body cap. It's generous
@@ -124,6 +158,9 @@ func toServiceDTO(s db.Service) serviceDTO {
 		PreserveHost:      s.PreserveHost,
 		PassthroughErrors: s.PassthroughErrors,
 		MaxBodySize:       s.MaxBodySize,
+		ReadTimeoutSecs:   s.ReadTimeoutSecs,
+		WriteTimeoutSecs:  s.WriteTimeoutSecs,
+		DialTimeoutSecs:   s.DialTimeoutSecs,
 		CreatedAt:         tsString(s.CreatedAt),
 		UpdatedAt:         tsString(s.UpdatedAt),
 	}
@@ -159,6 +196,18 @@ func (h *authHandlers) validateServiceReq(req *adminServiceReq) (headersJSON []b
 	}
 	if req.MaxBodySize != nil && (*req.MaxBodySize < 0 || *req.MaxBodySize > maxBodySizeCeiling) {
 		return nil, "max_body_size must be between 0 (unlimited) and 5368709120 (5 GiB)"
+	}
+	for _, t := range []struct {
+		name string
+		v    *int32
+	}{
+		{"read_timeout_secs", req.ReadTimeoutSecs},
+		{"write_timeout_secs", req.WriteTimeoutSecs},
+		{"dial_timeout_secs", req.DialTimeoutSecs},
+	} {
+		if t.v != nil && (*t.v < 0 || *t.v > timeoutCeiling) {
+			return nil, t.name + " must be between 0 (no timeout) and 3600 seconds"
+		}
 	}
 	if req.Headers == nil {
 		req.Headers = map[string]string{}
@@ -215,6 +264,9 @@ func (h *authHandlers) adminCreateService(c *echo.Context) error {
 		PreserveHost:      req.PreserveHost,
 		PassthroughErrors: req.passthroughErrors(),
 		MaxBodySize:       req.maxBodySize(),
+		ReadTimeoutSecs:   req.readTimeoutSecs(),
+		WriteTimeoutSecs:  req.writeTimeoutSecs(),
+		DialTimeoutSecs:   req.dialTimeoutSecs(),
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -263,6 +315,9 @@ func (h *authHandlers) adminUpdateService(c *echo.Context) error {
 		PreserveHost:      req.PreserveHost,
 		PassthroughErrors: req.passthroughErrors(),
 		MaxBodySize:       req.maxBodySize(),
+		ReadTimeoutSecs:   req.readTimeoutSecs(),
+		WriteTimeoutSecs:  req.writeTimeoutSecs(),
+		DialTimeoutSecs:   req.dialTimeoutSecs(),
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError

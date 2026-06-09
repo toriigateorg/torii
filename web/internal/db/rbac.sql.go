@@ -240,6 +240,9 @@ SELECT
     s.preserve_host,
     s.passthrough_errors,
     s.max_body_size,
+    s.read_timeout_secs,
+    s.write_timeout_secs,
+    s.dial_timeout_secs,
     s.created_at,
     s.updated_at,
     COALESCE(
@@ -260,6 +263,9 @@ type ListAllServicesWithRolesForCacheRow struct {
 	PreserveHost      bool
 	PassthroughErrors bool
 	MaxBodySize       int64
+	ReadTimeoutSecs   int32
+	WriteTimeoutSecs  int32
+	DialTimeoutSecs   int32
 	CreatedAt         pgtype.Timestamptz
 	UpdatedAt         pgtype.Timestamptz
 	RoleIds           []uuid.UUID
@@ -285,6 +291,9 @@ func (q *Queries) ListAllServicesWithRolesForCache(ctx context.Context) ([]ListA
 			&i.PreserveHost,
 			&i.PassthroughErrors,
 			&i.MaxBodySize,
+			&i.ReadTimeoutSecs,
+			&i.WriteTimeoutSecs,
+			&i.DialTimeoutSecs,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.RoleIds,
@@ -326,7 +335,7 @@ func (q *Queries) ListRolePermissions(ctx context.Context, roleID uuid.UUID) ([]
 }
 
 const listRoleServices = `-- name: ListRoleServices :many
-SELECT s.id, s.title, s.description, s.service_url, s.domain, s.headers, s.created_at, s.updated_at, s.signing_secret, s.preserve_host, s.passthrough_errors, s.max_body_size
+SELECT s.id, s.title, s.description, s.service_url, s.domain, s.headers, s.created_at, s.updated_at, s.signing_secret, s.preserve_host, s.passthrough_errors, s.max_body_size, s.read_timeout_secs, s.write_timeout_secs, s.dial_timeout_secs
 FROM services s
 JOIN role_services rs ON rs.service_id = s.id
 WHERE rs.role_id = $1
@@ -355,6 +364,9 @@ func (q *Queries) ListRoleServices(ctx context.Context, roleID uuid.UUID) ([]Ser
 			&i.PreserveHost,
 			&i.PassthroughErrors,
 			&i.MaxBodySize,
+			&i.ReadTimeoutSecs,
+			&i.WriteTimeoutSecs,
+			&i.DialTimeoutSecs,
 		); err != nil {
 			return nil, err
 		}
@@ -440,7 +452,7 @@ func (q *Queries) ListServiceRoles(ctx context.Context, serviceID uuid.UUID) ([]
 }
 
 const listServicesForUser = `-- name: ListServicesForUser :many
-SELECT DISTINCT s.id, s.title, s.description, s.service_url, s.domain, s.headers, s.created_at, s.updated_at, s.signing_secret, s.preserve_host, s.passthrough_errors, s.max_body_size
+SELECT DISTINCT s.id, s.title, s.description, s.service_url, s.domain, s.headers, s.created_at, s.updated_at, s.signing_secret, s.preserve_host, s.passthrough_errors, s.max_body_size, s.read_timeout_secs, s.write_timeout_secs, s.dial_timeout_secs
 FROM services s
 JOIN role_services rs ON rs.service_id = s.id
 JOIN user_roles ur ON ur.role_id = rs.role_id
@@ -470,6 +482,9 @@ func (q *Queries) ListServicesForUser(ctx context.Context, userID uuid.UUID) ([]
 			&i.PreserveHost,
 			&i.PassthroughErrors,
 			&i.MaxBodySize,
+			&i.ReadTimeoutSecs,
+			&i.WriteTimeoutSecs,
+			&i.DialTimeoutSecs,
 		); err != nil {
 			return nil, err
 		}

@@ -58,7 +58,24 @@ func ProxyTo(svc *CachedService, ident Identity, c *echo.Context) error {
 		inbound.Body = http.MaxBytesReader(c.Response(), inbound.Body, svc.MaxBodySize)
 	}
 
+	// Per-service read/write deadlines on the client<->torii connection. The
+	// server-level ReadTimeout/WriteTimeout are disabled (see cmd/serve.go) so
+	// these are the effective limits; a default is applied globally and
+	// overridden here per service.
+	//
+	// WebSocket/upgrade requests hijack the connection for long-lived
+	// bidirectional streaming, so any deadline (including the global default
+	// set upstream of dispatch) would kill them. Clear deadlines for those.
+	if isUpgradeRequest(inbound) {
+		SetDeadlines(c.Response(), 0, 0)
+	} else {
+		SetDeadlines(c.Response(), svc.ReadTimeout, svc.WriteTimeout)
+	}
+
 	rp := httputil.NewSingleHostReverseProxy(svc.Target)
+	if svc.Transport != nil {
+		rp.Transport = svc.Transport
+	}
 	originalDirector := rp.Director
 	rp.Director = func(req *http.Request) {
 		originalDirector(req)
@@ -137,6 +154,33 @@ func ProxyTo(svc *CachedService, ident Identity, c *echo.Context) error {
 	}
 	rp.ServeHTTP(c.Response(), c.Request())
 	return nil
+}
+
+// isUpgradeRequest reports whether the request is asking to switch protocols
+// (e.g. a WebSocket handshake), which the reverse proxy serves by hijacking
+// the connection for long-lived streaming.
+func isUpgradeRequest(r *http.Request) bool {
+	return r.Header.Get("Upgrade") != "" ||
+		strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade")
+}
+
+// SetDeadlines applies per-request read/write deadlines to the underlying
+// connection via http.ResponseController. A zero duration clears the deadline
+// (no timeout). Errors are ignored: if the writer doesn't support deadlines
+// the request simply runs without them rather than failing.
+func SetDeadlines(w http.ResponseWriter, read, write time.Duration) {
+	rc := http.NewResponseController(w)
+	now := time.Now()
+	if read > 0 {
+		_ = rc.SetReadDeadline(now.Add(read))
+	} else {
+		_ = rc.SetReadDeadline(time.Time{})
+	}
+	if write > 0 {
+		_ = rc.SetWriteDeadline(now.Add(write))
+	} else {
+		_ = rc.SetWriteDeadline(time.Time{})
+	}
 }
 
 // stripCookies rewrites the request's Cookie header to omit the named cookies.
