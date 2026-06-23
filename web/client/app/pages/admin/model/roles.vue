@@ -222,13 +222,10 @@ async function confirmDelete() {
 
 <template>
   <AdminShell>
-    <div class="flex items-center justify-between gap-4 flex-wrap mb-6">
+    <div class="flex items-center justify-between gap-4 flex-wrap mb-2">
       <div>
         <p class="text-mono-label">// roles</p>
         <h2 class="text-xl font-semibold tracking-tight mt-1">All roles</h2>
-        <p class="text-sm text-muted-foreground mt-1">
-          Roles bundle admin permissions and proxied service access. Members of a role inherit both.
-        </p>
       </div>
       <div class="flex items-center gap-2">
         <div class="relative">
@@ -255,6 +252,10 @@ async function confirmDelete() {
         </Button>
       </div>
     </div>
+
+    <p class="text-sm text-muted-foreground mb-6">
+      Roles bundle admin permissions and proxied service access. Members of a role inherit both.
+    </p>
 
     <Alert v-if="error" variant="destructive" class="mb-4">
       <AlertDescription>{{ error }}</AlertDescription>
