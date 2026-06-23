@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Plus, Trash2, Pencil, X, RefreshCw } from "lucide-vue-next"
+import { Plus, Trash2, Pencil, X, RefreshCw, Search } from "lucide-vue-next"
+import { watchDebounced } from "@vueuse/core"
 import type { Service, ServicePayload, ServiceHealth } from "~/composables/useAdminApi"
 
 interface HealthState {
@@ -13,6 +14,7 @@ useSeoMeta({ title: "Admin · Services — torii", robots: "noindex, nofollow" }
 const api = useAdminApi()
 
 const items = ref<Service[]>([])
+const search = ref("")
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
@@ -84,7 +86,7 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const res = await api.listServices(page.value, pageSize.value)
+    const res = await api.listServices(page.value, pageSize.value, search.value.trim())
     items.value = res.items
     total.value = res.total
     health.value = {}
@@ -98,6 +100,14 @@ async function load() {
 }
 
 watch(page, load)
+watchDebounced(
+  search,
+  () => {
+    if (page.value === 1) load()
+    else page.value = 1
+  },
+  { debounce: 300 },
+)
 onMounted(load)
 
 function resetForm() {
@@ -236,6 +246,25 @@ async function confirmDelete() {
         <h2 class="text-xl font-semibold tracking-tight mt-1">All services</h2>
       </div>
       <div class="flex items-center gap-2">
+        <div class="relative">
+          <Search class="size-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+          <Input
+            v-model="search"
+            type="search"
+            placeholder="Search services…"
+            aria-label="Search services"
+            class="h-9 w-56 pl-8 pr-8"
+          />
+          <button
+            v-if="search"
+            type="button"
+            class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            aria-label="Clear search"
+            @click="search = ''"
+          >
+            <X class="size-4" aria-hidden="true" />
+          </button>
+        </div>
         <Button
           variant="outline"
           class="h-9"
@@ -275,7 +304,7 @@ async function confirmDelete() {
           </TableRow>
           <TableRow v-else-if="!items.length">
             <TableCell colspan="6" class="text-center py-12 text-muted-foreground font-mono text-xs">
-              no services
+              {{ search.trim() ? "no matching services" : "no services" }}
             </TableCell>
           </TableRow>
           <TableRow v-for="s in items" :key="s.id">

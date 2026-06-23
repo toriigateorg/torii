@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v5"
 
 	"torii/internal/audit"
@@ -226,11 +227,16 @@ func (h *authHandlers) adminListServices(c *echo.Context) error {
 	ctx := c.Request().Context()
 	limit, offset, page, pageSize := parsePagination(c)
 
-	rows, err := h.q.ListServices(ctx, db.ListServicesParams{Lim: limit, Off: offset})
+	var search pgtype.Text
+	if q := strings.TrimSpace(c.QueryParam("search")); q != "" {
+		search = pgtype.Text{String: q, Valid: true}
+	}
+
+	rows, err := h.q.ListServices(ctx, db.ListServicesParams{Lim: limit, Off: offset, Search: search})
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not list services"})
 	}
-	total, err := h.q.CountServices(ctx)
+	total, err := h.q.CountFilteredServices(ctx, search)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not count services"})
 	}

@@ -281,10 +281,10 @@ export function useAdminApi() {
         method: "POST",
       })
     },
-    listServices(page: number, pageSize = 20) {
+    listServices(page: number, pageSize = 20, search = "") {
       return $fetch<ServiceListResponse>("/_torii/api/v1/admin/services", {
         ...opts(),
-        query: { page, page_size: pageSize },
+        query: { page, page_size: pageSize, ...(search ? { search } : {}) },
       })
     },
     createService(payload: ServicePayload) {
@@ -310,10 +310,10 @@ export function useAdminApi() {
     checkServiceHealth(id: string) {
       return $fetch<ServiceHealth>(`/_torii/api/v1/admin/services/${id}/health`, opts())
     },
-    listRoles(page: number, pageSize = 20) {
+    listRoles(page: number, pageSize = 20, search = "") {
       return $fetch<RoleListResponse>("/_torii/api/v1/admin/roles", {
         ...opts(),
-        query: { page, page_size: pageSize },
+        query: { page, page_size: pageSize, ...(search ? { search } : {}) },
       })
     },
     getRole(id: string) {

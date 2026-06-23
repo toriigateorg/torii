@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Plus, Trash2, Pencil } from "lucide-vue-next"
+import { Plus, Trash2, Pencil, Search, X } from "lucide-vue-next"
+import { watchDebounced } from "@vueuse/core"
 import type { AuthUser } from "~/composables/useAuth"
 import type { Role, Service, CreateRolePayload } from "~/composables/useAdminApi"
 
@@ -9,6 +10,7 @@ useSeoMeta({ title: "Admin · Roles — torii", robots: "noindex, nofollow" })
 const api = useAdminApi()
 
 const items = ref<Role[]>([])
+const search = ref("")
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
@@ -43,7 +45,7 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const res = await api.listRoles(page.value, pageSize.value)
+    const res = await api.listRoles(page.value, pageSize.value, search.value.trim())
     items.value = res.items
     total.value = res.total
   } catch (e: unknown) {
@@ -55,6 +57,14 @@ async function load() {
 }
 
 watch(page, load)
+watchDebounced(
+  search,
+  () => {
+    if (page.value === 1) load()
+    else page.value = 1
+  },
+  { debounce: 300 },
+)
 onMounted(async () => {
   await load()
   try {
@@ -220,9 +230,30 @@ async function confirmDelete() {
           Roles bundle admin permissions and proxied service access. Members of a role inherit both.
         </p>
       </div>
-      <Button class="h-9" @click="createOpen = true; resetCreate()">
-        <Plus class="size-4 mr-1.5" aria-hidden="true" /> Create role
-      </Button>
+      <div class="flex items-center gap-2">
+        <div class="relative">
+          <Search class="size-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+          <Input
+            v-model="search"
+            type="search"
+            placeholder="Search roles…"
+            aria-label="Search roles"
+            class="h-9 w-56 pl-8 pr-8"
+          />
+          <button
+            v-if="search"
+            type="button"
+            class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            aria-label="Clear search"
+            @click="search = ''"
+          >
+            <X class="size-4" aria-hidden="true" />
+          </button>
+        </div>
+        <Button class="h-9" @click="createOpen = true; resetCreate()">
+          <Plus class="size-4 mr-1.5" aria-hidden="true" /> Create role
+        </Button>
+      </div>
     </div>
 
     <Alert v-if="error" variant="destructive" class="mb-4">
@@ -248,7 +279,7 @@ async function confirmDelete() {
           </TableRow>
           <TableRow v-else-if="!items.length">
             <TableCell colspan="4" class="text-center py-12 text-muted-foreground font-mono text-xs">
-              no roles
+              {{ search.trim() ? "no matching roles" : "no roles" }}
             </TableCell>
           </TableRow>
           <TableRow

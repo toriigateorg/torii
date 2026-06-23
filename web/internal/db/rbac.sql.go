@@ -58,6 +58,22 @@ func (q *Queries) CountAdmins(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const countFilteredRoles = `-- name: CountFilteredRoles :one
+SELECT count(*) FROM roles
+WHERE (
+    $1::text IS NULL
+    OR name ILIKE '%' || $1::text || '%'
+    OR description ILIKE '%' || $1::text || '%'
+)
+`
+
+func (q *Queries) CountFilteredRoles(ctx context.Context, search pgtype.Text) (int64, error) {
+	row := q.db.QueryRow(ctx, countFilteredRoles, search)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countRoles = `-- name: CountRoles :one
 SELECT count(*) FROM roles
 `
@@ -380,17 +396,23 @@ func (q *Queries) ListRoleServices(ctx context.Context, roleID uuid.UUID) ([]Ser
 
 const listRoles = `-- name: ListRoles :many
 SELECT id, name, description, is_system, created_at, updated_at FROM roles
+WHERE (
+    $1::text IS NULL
+    OR name ILIKE '%' || $1::text || '%'
+    OR description ILIKE '%' || $1::text || '%'
+)
 ORDER BY is_system DESC, name ASC, id ASC
-LIMIT $2::int OFFSET $1::int
+LIMIT $3::int OFFSET $2::int
 `
 
 type ListRolesParams struct {
-	Off int32
-	Lim int32
+	Search pgtype.Text
+	Off    int32
+	Lim    int32
 }
 
 func (q *Queries) ListRoles(ctx context.Context, arg ListRolesParams) ([]Role, error) {
-	rows, err := q.db.Query(ctx, listRoles, arg.Off, arg.Lim)
+	rows, err := q.db.Query(ctx, listRoles, arg.Search, arg.Off, arg.Lim)
 	if err != nil {
 		return nil, err
 	}

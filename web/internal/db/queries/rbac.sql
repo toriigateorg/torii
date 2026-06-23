@@ -11,11 +11,24 @@ SELECT * FROM roles WHERE name = $1;
 
 -- name: ListRoles :many
 SELECT * FROM roles
+WHERE (
+    sqlc.narg('search')::text IS NULL
+    OR name ILIKE '%' || sqlc.narg('search')::text || '%'
+    OR description ILIKE '%' || sqlc.narg('search')::text || '%'
+)
 ORDER BY is_system DESC, name ASC, id ASC
 LIMIT sqlc.arg('lim')::int OFFSET sqlc.arg('off')::int;
 
 -- name: CountRoles :one
 SELECT count(*) FROM roles;
+
+-- name: CountFilteredRoles :one
+SELECT count(*) FROM roles
+WHERE (
+    sqlc.narg('search')::text IS NULL
+    OR name ILIKE '%' || sqlc.narg('search')::text || '%'
+    OR description ILIKE '%' || sqlc.narg('search')::text || '%'
+);
 
 -- name: UpdateRole :one
 UPDATE roles

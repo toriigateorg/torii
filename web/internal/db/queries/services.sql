@@ -11,11 +11,28 @@ SELECT * FROM services WHERE domain = $1;
 
 -- name: ListServices :many
 SELECT * FROM services
+WHERE (
+    sqlc.narg('search')::text IS NULL
+    OR title ILIKE '%' || sqlc.narg('search')::text || '%'
+    OR description ILIKE '%' || sqlc.narg('search')::text || '%'
+    OR domain ILIKE '%' || sqlc.narg('search')::text || '%'
+    OR service_url ILIKE '%' || sqlc.narg('search')::text || '%'
+)
 ORDER BY created_at ASC, id ASC
 LIMIT sqlc.arg('lim')::int OFFSET sqlc.arg('off')::int;
 
 -- name: CountServices :one
 SELECT count(*) FROM services;
+
+-- name: CountFilteredServices :one
+SELECT count(*) FROM services
+WHERE (
+    sqlc.narg('search')::text IS NULL
+    OR title ILIKE '%' || sqlc.narg('search')::text || '%'
+    OR description ILIKE '%' || sqlc.narg('search')::text || '%'
+    OR domain ILIKE '%' || sqlc.narg('search')::text || '%'
+    OR service_url ILIKE '%' || sqlc.narg('search')::text || '%'
+);
 
 -- name: UpdateService :one
 UPDATE services

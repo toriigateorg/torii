@@ -9,7 +9,26 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const countFilteredServices = `-- name: CountFilteredServices :one
+SELECT count(*) FROM services
+WHERE (
+    $1::text IS NULL
+    OR title ILIKE '%' || $1::text || '%'
+    OR description ILIKE '%' || $1::text || '%'
+    OR domain ILIKE '%' || $1::text || '%'
+    OR service_url ILIKE '%' || $1::text || '%'
+)
+`
+
+func (q *Queries) CountFilteredServices(ctx context.Context, search pgtype.Text) (int64, error) {
+	row := q.db.QueryRow(ctx, countFilteredServices, search)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
 
 const countServices = `-- name: CountServices :one
 SELECT count(*) FROM services
@@ -142,17 +161,25 @@ func (q *Queries) GetServiceByID(ctx context.Context, id uuid.UUID) (Service, er
 
 const listServices = `-- name: ListServices :many
 SELECT id, title, description, service_url, domain, headers, created_at, updated_at, signing_secret, preserve_host, passthrough_errors, max_body_size, read_timeout_secs, write_timeout_secs, dial_timeout_secs FROM services
+WHERE (
+    $1::text IS NULL
+    OR title ILIKE '%' || $1::text || '%'
+    OR description ILIKE '%' || $1::text || '%'
+    OR domain ILIKE '%' || $1::text || '%'
+    OR service_url ILIKE '%' || $1::text || '%'
+)
 ORDER BY created_at ASC, id ASC
-LIMIT $2::int OFFSET $1::int
+LIMIT $3::int OFFSET $2::int
 `
 
 type ListServicesParams struct {
-	Off int32
-	Lim int32
+	Search pgtype.Text
+	Off    int32
+	Lim    int32
 }
 
 func (q *Queries) ListServices(ctx context.Context, arg ListServicesParams) ([]Service, error) {
-	rows, err := q.db.Query(ctx, listServices, arg.Off, arg.Lim)
+	rows, err := q.db.Query(ctx, listServices, arg.Search, arg.Off, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
