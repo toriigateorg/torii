@@ -14,11 +14,28 @@ LIMIT 1;
 
 -- name: ListUsers :many
 SELECT * FROM users
+WHERE (
+    sqlc.narg('search')::text IS NULL
+    OR username ILIKE '%' || sqlc.narg('search')::text || '%'
+    OR email ILIKE '%' || sqlc.narg('search')::text || '%'
+    OR first_name ILIKE '%' || sqlc.narg('search')::text || '%'
+    OR last_name ILIKE '%' || sqlc.narg('search')::text || '%'
+)
 ORDER BY created_at ASC, id ASC
 LIMIT sqlc.arg('lim')::int OFFSET sqlc.arg('off')::int;
 
 -- name: CountUsers :one
 SELECT count(*) FROM users;
+
+-- name: CountFilteredUsers :one
+SELECT count(*) FROM users
+WHERE (
+    sqlc.narg('search')::text IS NULL
+    OR username ILIKE '%' || sqlc.narg('search')::text || '%'
+    OR email ILIKE '%' || sqlc.narg('search')::text || '%'
+    OR first_name ILIKE '%' || sqlc.narg('search')::text || '%'
+    OR last_name ILIKE '%' || sqlc.narg('search')::text || '%'
+);
 
 -- name: DeleteUser :exec
 DELETE FROM users WHERE id = $1;

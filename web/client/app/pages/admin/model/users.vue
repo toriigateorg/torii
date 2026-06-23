@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Plus, Trash2, ShieldCheck } from "lucide-vue-next"
+import { Plus, Trash2, ShieldCheck, Search, X } from "lucide-vue-next"
+import { watchDebounced } from "@vueuse/core"
 import type { AuthUser } from "~/composables/useAuth"
 import type { CreateUserPayload, Role } from "~/composables/useAdminApi"
 
@@ -17,6 +18,7 @@ function pageFromQuery(q: unknown): number {
 }
 
 const items = ref<AuthUser[]>([])
+const search = ref(typeof route.query.q === "string" ? route.query.q : "")
 const page = ref(pageFromQuery(route.query.page))
 const pageSize = ref(20)
 const total = ref(0)
@@ -49,7 +51,7 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const res = await api.listUsers(page.value, pageSize.value)
+    const res = await api.listUsers(page.value, pageSize.value, search.value.trim())
     items.value = res.items
     total.value = res.total
   } catch (e: unknown) {
@@ -74,6 +76,21 @@ watch(() => route.query.page, (q) => {
   const p = pageFromQuery(q)
   if (p !== page.value) page.value = p
 })
+
+watchDebounced(
+  search,
+  () => {
+    const query = { ...route.query }
+    const q = search.value.trim()
+    if (q) query.q = q
+    else delete query.q
+    delete query.page
+    router.replace({ query })
+    if (page.value === 1) load()
+    else page.value = 1
+  },
+  { debounce: 300 },
+)
 onMounted(load)
 
 function resetCreate() {
@@ -174,9 +191,30 @@ async function toggleRole(role: Role) {
         <p class="text-mono-label">// users</p>
         <h2 class="text-xl font-semibold tracking-tight mt-1">All users</h2>
       </div>
-      <Button class="h-9" @click="createOpen = true; resetCreate()">
-        <Plus class="size-4 mr-1.5" aria-hidden="true" /> Create user
-      </Button>
+      <div class="flex items-center gap-2">
+        <div class="relative">
+          <Search class="size-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+          <Input
+            v-model="search"
+            type="search"
+            placeholder="Search users…"
+            aria-label="Search users"
+            class="h-9 w-56 pl-8 pr-8"
+          />
+          <button
+            v-if="search"
+            type="button"
+            class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            aria-label="Clear search"
+            @click="search = ''"
+          >
+            <X class="size-4" aria-hidden="true" />
+          </button>
+        </div>
+        <Button class="h-9" @click="createOpen = true; resetCreate()">
+          <Plus class="size-4 mr-1.5" aria-hidden="true" /> Create user
+        </Button>
+      </div>
     </div>
 
     <Alert v-if="error" variant="destructive" class="mb-4">
@@ -203,7 +241,7 @@ async function toggleRole(role: Role) {
           </TableRow>
           <TableRow v-else-if="!items.length">
             <TableCell colspan="5" class="text-center py-12 text-muted-foreground font-mono text-xs">
-              no users
+              {{ search.trim() ? "no matching users" : "no users" }}
             </TableCell>
           </TableRow>
           <TableRow v-for="u in items" :key="u.id">

@@ -228,10 +228,10 @@ export function useAdminApi() {
         query: { window },
       })
     },
-    listUsers(page: number, pageSize = 20) {
+    listUsers(page: number, pageSize = 20, search = "") {
       return $fetch<UserListResponse>("/_torii/api/v1/admin/users", {
         ...opts(),
-        query: { page, page_size: pageSize },
+        query: { page, page_size: pageSize, ...(search ? { search } : {}) },
       })
     },
     createUser(payload: CreateUserPayload) {

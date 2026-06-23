@@ -33,11 +33,16 @@ func (h *authHandlers) adminListUsers(c *echo.Context) error {
 	ctx := c.Request().Context()
 	limit, offset, page, pageSize := parsePagination(c)
 
-	rows, err := h.q.ListUsers(ctx, db.ListUsersParams{Lim: limit, Off: offset})
+	var search pgtype.Text
+	if q := strings.TrimSpace(c.QueryParam("search")); q != "" {
+		search = pgtype.Text{String: q, Valid: true}
+	}
+
+	rows, err := h.q.ListUsers(ctx, db.ListUsersParams{Lim: limit, Off: offset, Search: search})
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not list users"})
 	}
-	total, err := h.q.CountUsers(ctx)
+	total, err := h.q.CountFilteredUsers(ctx, search)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not count users"})
 	}

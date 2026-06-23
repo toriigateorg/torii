@@ -12,6 +12,24 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countFilteredUsers = `-- name: CountFilteredUsers :one
+SELECT count(*) FROM users
+WHERE (
+    $1::text IS NULL
+    OR username ILIKE '%' || $1::text || '%'
+    OR email ILIKE '%' || $1::text || '%'
+    OR first_name ILIKE '%' || $1::text || '%'
+    OR last_name ILIKE '%' || $1::text || '%'
+)
+`
+
+func (q *Queries) CountFilteredUsers(ctx context.Context, search pgtype.Text) (int64, error) {
+	row := q.db.QueryRow(ctx, countFilteredUsers, search)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countUsers = `-- name: CountUsers :one
 SELECT count(*) FROM users
 `
@@ -143,17 +161,25 @@ func (q *Queries) IncrementFailedLogin(ctx context.Context, id uuid.UUID) (Incre
 
 const listUsers = `-- name: ListUsers :many
 SELECT id, username, email, first_name, last_name, password_hash, created_at, updated_at, failed_login_count, locked_until FROM users
+WHERE (
+    $1::text IS NULL
+    OR username ILIKE '%' || $1::text || '%'
+    OR email ILIKE '%' || $1::text || '%'
+    OR first_name ILIKE '%' || $1::text || '%'
+    OR last_name ILIKE '%' || $1::text || '%'
+)
 ORDER BY created_at ASC, id ASC
-LIMIT $2::int OFFSET $1::int
+LIMIT $3::int OFFSET $2::int
 `
 
 type ListUsersParams struct {
-	Off int32
-	Lim int32
+	Search pgtype.Text
+	Off    int32
+	Lim    int32
 }
 
 func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error) {
-	rows, err := q.db.Query(ctx, listUsers, arg.Off, arg.Lim)
+	rows, err := q.db.Query(ctx, listUsers, arg.Search, arg.Off, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
