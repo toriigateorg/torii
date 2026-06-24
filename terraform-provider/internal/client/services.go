@@ -7,22 +7,37 @@ import (
 )
 
 type Service struct {
-	ID          string            `json:"id"`
-	Title       string            `json:"title"`
-	Description string            `json:"description"`
-	ServiceURL  string            `json:"service_url"`
-	Domain      string            `json:"domain"`
-	Headers     map[string]string `json:"headers"`
-	CreatedAt   string            `json:"created_at"`
-	UpdatedAt   string            `json:"updated_at"`
+	ID                string            `json:"id"`
+	Title             string            `json:"title"`
+	Description       string            `json:"description"`
+	ServiceURL        string            `json:"service_url"`
+	Domain            string            `json:"domain"`
+	Headers           map[string]string `json:"headers"`
+	PreserveHost      bool              `json:"preserve_host"`
+	PassthroughErrors bool              `json:"passthrough_errors"`
+	MaxBodySize       int64             `json:"max_body_size"`
+	ReadTimeoutSecs   int32             `json:"read_timeout_secs"`
+	WriteTimeoutSecs  int32             `json:"write_timeout_secs"`
+	DialTimeoutSecs   int32             `json:"dial_timeout_secs"`
+	CreatedAt         string            `json:"created_at"`
+	UpdatedAt         string            `json:"updated_at"`
 }
 
+// ServiceWrite mirrors the admin API's request shape. The four pointer fields
+// are optional server-side (nil keeps the server default); preserve_host is a
+// plain bool the server reads unconditionally.
 type ServiceWrite struct {
-	Title       string            `json:"title"`
-	Description string            `json:"description"`
-	ServiceURL  string            `json:"service_url"`
-	Domain      string            `json:"domain"`
-	Headers     map[string]string `json:"headers"`
+	Title             string            `json:"title"`
+	Description       string            `json:"description"`
+	ServiceURL        string            `json:"service_url"`
+	Domain            string            `json:"domain"`
+	Headers           map[string]string `json:"headers"`
+	PreserveHost      bool              `json:"preserve_host"`
+	PassthroughErrors *bool             `json:"passthrough_errors,omitempty"`
+	MaxBodySize       *int64            `json:"max_body_size,omitempty"`
+	ReadTimeoutSecs   *int32            `json:"read_timeout_secs,omitempty"`
+	WriteTimeoutSecs  *int32            `json:"write_timeout_secs,omitempty"`
+	DialTimeoutSecs   *int32            `json:"dial_timeout_secs,omitempty"`
 }
 
 type serviceListResp struct {
@@ -46,6 +61,30 @@ func (c *Client) GetService(ctx context.Context, id string) (*Service, error) {
 		}
 		for i := range resp.Items {
 			if resp.Items[i].ID == id {
+				return &resp.Items[i], nil
+			}
+		}
+		if int64(page*pageSize) >= resp.Total || len(resp.Items) == 0 {
+			return nil, ErrNotFound
+		}
+		page++
+	}
+}
+
+// FindServiceByDomain resolves a service by its exact domain using the
+// server-side search filter.
+func (c *Client) FindServiceByDomain(ctx context.Context, domain string) (*Service, error) {
+	page := 1
+	const pageSize = 100
+	for {
+		var resp serviceListResp
+		path := fmt.Sprintf("/api/v1/admin/services?page=%d&page_size=%d&search=%s",
+			page, pageSize, url.QueryEscape(domain))
+		if err := c.do(ctx, "GET", path, nil, &resp); err != nil {
+			return nil, err
+		}
+		for i := range resp.Items {
+			if resp.Items[i].Domain == domain {
 				return &resp.Items[i], nil
 			}
 		}

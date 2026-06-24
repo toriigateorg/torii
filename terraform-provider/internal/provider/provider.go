@@ -89,9 +89,17 @@ func (p *toriiProvider) Resources(_ context.Context) []func() resource.Resource 
 		NewServiceResource,
 		NewRoleResource,
 		NewRoleServiceResource,
+		NewUserResource,
+		NewUserRoleResource,
+		NewSSOProviderResource,
 	}
 }
 
 func (p *toriiProvider) DataSources(_ context.Context) []func() datasource.DataSource {
-	return nil
+	return []func() datasource.DataSource{
+		NewPermissionsDataSource,
+		NewServiceDataSource,
+		NewRoleDataSource,
+		NewUserDataSource,
+	}
 }

@@ -25,13 +25,46 @@ builds:
     ldflags:
       - -s -w -X torii/internal/version.Version={{.Version}}
 
+  # The Terraform provider is a separate Go module under terraform-provider/.
+  # Released alongside torii under the same tag; binaries are named with the
+  # `terraform-provider-NAME_vVERSION` convention so they can be dropped into a
+  # local plugin dir (and uploaded to the registry later if we sign them).
+  - id: terraform-provider
+    dir: terraform-provider
+    main: .
+    binary: terraform-provider-torii_v{{ .Version }}
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows, freebsd]
+    goarch: [amd64, arm64, "386", arm]
+    ignore:
+      - goos: darwin
+        goarch: "386"
+      - goos: darwin
+        goarch: arm
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
 archives:
   - id: torii
+    builds: [torii]
     format: tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE
       - README.md
+
+  - id: terraform-provider
+    builds: [terraform-provider]
+    format: zip
+    name_template: "terraform-provider-torii_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - src: terraform-provider/README.md
+        dst: README.md
 
 checksum:
   name_template: "checksums.txt"
@@ -66,6 +99,7 @@ dockers:
       - "codingcoffee/torii:latest"
     dockerfile: web/Dockerfile.release
     use: docker
+    ids: [torii]
     goos: linux
     goarch: amd64
     build_flag_templates:

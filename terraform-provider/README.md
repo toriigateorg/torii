@@ -1,6 +1,6 @@
 # terraform-provider-torii
 
-Manage [torii](../web) services and RBAC roles via Terraform.
+Manage [torii](../web) services, users, RBAC, and SSO providers via Terraform.
 
 > **Status:** v0, in-tree, not yet published to the Terraform Registry.
 > Use via local `dev_overrides`.
@@ -12,8 +12,32 @@ Manage [torii](../web) services and RBAC roles via Terraform.
 | `torii_service`       | `/api/v1/admin/services`                   |
 | `torii_role`          | `/api/v1/admin/roles` (+ permissions PUT)  |
 | `torii_role_service`  | `/api/v1/admin/roles/:id/services`         |
+| `torii_user`          | `/api/v1/admin/users` (+ password POST)    |
+| `torii_user_role`     | `/api/v1/admin/users/:id/roles`            |
+| `torii_sso_provider`  | `/api/v1/admin/sso`                        |
 
-User management, SSO providers, settings, and audit logs are not yet exposed.
+## Data sources
+
+| Data source         | Wraps                          |
+| ------------------- | ------------------------------ |
+| `torii_permissions` | `/api/v1/admin/permissions`    |
+| `torii_service`     | `/api/v1/admin/services` (by id/domain)   |
+| `torii_role`        | `/api/v1/admin/roles` (by id/name)        |
+| `torii_user`        | `/api/v1/admin/users` (by id/username)    |
+
+API tokens, settings, and audit logs are not yet exposed.
+
+### Notes & caveats
+
+- **Write-only secrets.** `torii_user.password` and `torii_sso_provider.client_secret`
+  are never returned by the API, so Terraform cannot detect out-of-band drift on them.
+  Changing the value in config rotates the secret; that is the only signal.
+- **`torii_user` immutability.** The admin API has no field-update endpoint, so
+  `username`, `email`, `first_name`, and `last_name` force replacement. Only `password`
+  updates in place.
+- **The `all` role** is auto-assigned to every user by torii and cannot be managed with
+  `torii_user_role`. System roles (`admin`, `all`) likewise cannot be created, updated, or
+  deleted via `torii_role`.
 
 ## Bootstrap
 
@@ -39,8 +63,8 @@ The provider authenticates to torii with a long-lived API token
    ```
 
 The token inherits the owning user's permissions. Give the token's user the
-`services.*`, `roles.*`, `role_services.*`, and `permissions.read`
-permissions.
+permissions for whatever it manages — e.g. `services.*`, `roles.*`,
+`role_services.*`, `users.*`, `user_roles.*`, `sso.*`, and `permissions.read`.
 
 ## Local development
 

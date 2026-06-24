@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 )
 
@@ -39,6 +40,41 @@ func (c *Client) GetRole(ctx context.Context, id string) (*Role, error) {
 		out.Permissions = []string{}
 	}
 	return &out, nil
+}
+
+type roleListResp struct {
+	Items    []Role `json:"items"`
+	Page     int    `json:"page"`
+	PageSize int    `json:"page_size"`
+	Total    int64  `json:"total"`
+}
+
+// FindRoleByName resolves a role by its exact name using the server-side
+// search filter. The list endpoint already embeds each role's permissions.
+func (c *Client) FindRoleByName(ctx context.Context, name string) (*Role, error) {
+	page := 1
+	const pageSize = 100
+	for {
+		var resp roleListResp
+		path := fmt.Sprintf("/api/v1/admin/roles?page=%d&page_size=%d&search=%s",
+			page, pageSize, url.QueryEscape(name))
+		if err := c.do(ctx, "GET", path, nil, &resp); err != nil {
+			return nil, err
+		}
+		for i := range resp.Items {
+			if resp.Items[i].Name == name {
+				role := resp.Items[i]
+				if role.Permissions == nil {
+					role.Permissions = []string{}
+				}
+				return &role, nil
+			}
+		}
+		if int64(page*pageSize) >= resp.Total || len(resp.Items) == 0 {
+			return nil, ErrNotFound
+		}
+		page++
+	}
 }
 
 func (c *Client) CreateRole(ctx context.Context, in RoleCreate) (*Role, error) {
