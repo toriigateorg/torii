@@ -18,7 +18,7 @@ func main() {
 	flag.Parse()
 
 	err := providerserver.Serve(context.Background(), provider.New(version), providerserver.ServeOpts{
-		Address: "registry.terraform.io/torii/torii",
+		Address: "registry.terraform.io/toriigateorg/torii",
 		Debug:   debug,
 	})
 	if err != nil {

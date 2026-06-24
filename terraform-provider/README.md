@@ -79,7 +79,7 @@ Then in `~/.terraformrc`:
 ```hcl
 provider_installation {
   dev_overrides {
-    "torii/torii" = "/path/to/torii/terraform-provider"
+    "toriigateorg/torii" = "/path/to/torii/terraform-provider"
   }
   direct {}
 }
@@ -90,7 +90,7 @@ provider_installation {
 ```hcl
 terraform {
   required_providers {
-    torii = { source = "torii/torii" }
+    torii = { source = "toriigateorg/torii" }
   }
 }
 
