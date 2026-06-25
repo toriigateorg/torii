@@ -16,10 +16,9 @@ release-image:
     docker build -f Dockerfile.releaser -t {{ releaser_image }} .
 
 # Cut a release: bump VERSION, tag, push, then hand off to goreleaser running
-# inside the release-runner container which builds cross-platform binaries
-# (the torii server AND the terraform-provider, which shares this tag), builds
-# + pushes the docker image (via the bind-mounted host docker socket), and
-# creates the GitHub release with changelog + asset uploads.
+# inside the release-runner container which builds cross-platform binaries,
+# builds + pushes the docker image (via the bind-mounted host docker socket),
+# and creates the GitHub release with changelog + asset uploads.
 #
 # Requires: docker login (on host), GITHUB_TOKEN in env (or gh auth token).
 # KIND is patch (default), minor, or major.
