@@ -46,6 +46,9 @@ type userDTO struct {
 	LastName    string        `json:"last_name"`
 	Roles       []roleSummary `json:"roles"`
 	Permissions []string      `json:"permissions"`
+	// SsoOnly is true when the account has no password hash and can therefore
+	// only authenticate through an SSO provider.
+	SsoOnly bool `json:"sso_only"`
 }
 
 func toDTO(u db.User, roles []roleSummary, perms []string) userDTO {
@@ -63,6 +66,7 @@ func toDTO(u db.User, roles []roleSummary, perms []string) userDTO {
 		LastName:    u.LastName,
 		Roles:       roles,
 		Permissions: perms,
+		SsoOnly:     !u.PasswordHash.Valid,
 	}
 }
 

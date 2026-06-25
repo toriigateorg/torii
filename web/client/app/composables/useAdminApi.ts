@@ -13,9 +13,10 @@ export interface UserListResponse extends PageMeta {
 export interface CreateUserPayload {
   username: string
   email: string
-  password: string
+  password?: string
   first_name: string
   last_name: string
+  sso_only?: boolean
 }
 
 export type TokenStatus = "active" | "revoked" | "expired"

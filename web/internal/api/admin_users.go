@@ -27,6 +27,9 @@ type adminCreateUserReq struct {
 	Password  string `json:"password"`
 	FirstName string `json:"first_name"`
 	LastName  string `json:"last_name"`
+	// SsoOnly creates the account with no password hash, so it can only sign in
+	// through an SSO provider. A password must not be supplied alongside it.
+	SsoOnly bool `json:"sso_only"`
 }
 
 func (h *authHandlers) adminListUsers(c *echo.Context) error {
@@ -77,17 +80,27 @@ func (h *authHandlers) adminCreateUser(c *echo.Context) error {
 	if !emailRe.MatchString(req.Email) {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid email"})
 	}
-	if h.cfg.IsProd() {
-		if err := auth.ValidatePasswordStrength(req.Password); err != nil {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	// An sso_only account carries no password hash; it authenticates purely via
+	// an SSO provider. Reject a password supplied alongside the flag so callers
+	// don't think one was set.
+	passwordHash := pgtype.Text{Valid: false}
+	if req.SsoOnly {
+		if req.Password != "" {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "password must not be set for an sso_only user"})
 		}
-	} else if req.Password == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "password required"})
-	}
-
-	hash, err := auth.HashPassword(req.Password)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	} else {
+		if h.cfg.IsProd() {
+			if err := auth.ValidatePasswordStrength(req.Password); err != nil {
+				return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+			}
+		} else if req.Password == "" {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "password required"})
+		}
+		hash, err := auth.HashPassword(req.Password)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+		}
+		passwordHash = pgtype.Text{String: hash, Valid: true}
 	}
 
 	ctx := c.Request().Context()
@@ -104,7 +117,7 @@ func (h *authHandlers) adminCreateUser(c *echo.Context) error {
 		Email:        req.Email,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
-		PasswordHash: pgtype.Text{String: hash, Valid: true},
+		PasswordHash: passwordHash,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError

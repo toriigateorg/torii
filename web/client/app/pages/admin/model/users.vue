@@ -36,6 +36,7 @@ const newUser = ref<CreateUserPayload>({
   password: "",
   first_name: "",
   last_name: "",
+  sso_only: false,
 })
 
 const deleteTarget = ref<AuthUser | null>(null)
@@ -100,6 +101,7 @@ function resetCreate() {
     password: "",
     first_name: "",
     last_name: "",
+    sso_only: false,
   }
   createError.value = null
 }
@@ -108,7 +110,9 @@ async function submitCreate() {
   creating.value = true
   createError.value = null
   try {
-    await api.createUser(newUser.value)
+    const payload: CreateUserPayload = { ...newUser.value }
+    if (payload.sso_only) delete payload.password
+    await api.createUser(payload)
     createOpen.value = false
     resetCreate()
     page.value = 1
@@ -299,7 +303,9 @@ async function toggleRole(role: Role) {
         <DialogHeader>
           <DialogTitle>Create user</DialogTitle>
           <DialogDescription>
-            {{ isProd ? "Strong password required (8+ chars, upper, lower, digit, symbol)." : "Dev mode: any non-empty password works." }}
+            <template v-if="!newUser.sso_only">
+              {{ isProd ? "Strong password required (8+ chars, upper, lower, digit, symbol)." : "Dev mode: any non-empty password works." }}
+            </template>
             New users are added to the <span class="font-mono">all</span> role only — assign more roles after creation.
           </DialogDescription>
         </DialogHeader>
@@ -321,7 +327,20 @@ async function toggleRole(role: Role) {
               <Label for="cu-last">Last name</Label>
               <Input id="cu-last" v-model="newUser.last_name" />
             </div>
-            <div class="flex flex-col gap-1.5 col-span-2">
+            <label for="cu-sso" class="flex items-start gap-3 col-span-2 cursor-pointer">
+              <Checkbox
+                id="cu-sso"
+                :model-value="newUser.sso_only"
+                @update:model-value="(v) => (newUser.sso_only = v === true)"
+              />
+              <span class="flex-1 min-w-0">
+                <span class="text-sm">SSO-only account</span>
+                <span class="block text-xs text-muted-foreground mt-0.5">
+                  No password. The user can sign in only through an SSO provider.
+                </span>
+              </span>
+            </label>
+            <div v-if="!newUser.sso_only" class="flex flex-col gap-1.5 col-span-2">
               <Label for="cu-pw">Password</Label>
               <Input id="cu-pw" v-model="newUser.password" type="password" autocomplete="new-password" />
             </div>
