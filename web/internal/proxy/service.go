@@ -103,6 +103,7 @@ func ProxyTo(svc *CachedService, ident Identity, c *echo.Context) error {
 		// the torii API on its own hostname (or any other host that trusts
 		// the torii access cookie / Bearer).
 		req.Header.Del("Authorization")
+		req.Header.Del(auth.ServiceTokenHeader)
 		stripCookies(req, auth.AccessCookie, auth.RefreshCookie, auth.SessionCookie)
 
 		// Reject any inbound X-Torii-* a client might have set so we control

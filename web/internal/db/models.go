@@ -20,6 +20,25 @@ type ApiToken struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
+type ApiUser struct {
+	ID          uuid.UUID
+	Name        string
+	Description string
+	TokenHash   []byte
+	TokenPrefix string
+	ExpiresAt   pgtype.Timestamptz
+	LastUsedAt  pgtype.Timestamptz
+	Disabled    bool
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+type ApiUserRole struct {
+	ApiUserID uuid.UUID
+	RoleID    uuid.UUID
+	CreatedAt pgtype.Timestamptz
+}
+
 type AppSetting struct {
 	Key       string
 	Value     string

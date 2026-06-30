@@ -22,6 +22,15 @@ var apiTokenResolver APITokenResolver
 
 func SetAPITokenResolver(r APITokenResolver) { apiTokenResolver = r }
 
+// ServiceTokenResolver resolves a `torii_sat_...` plaintext token belonging to
+// a Service API user. Subject = api_user UUID string, Permissions empty (so it
+// can never satisfy a permission gate), RoleIDs populated for proxy RBAC.
+type ServiceTokenResolver func(ctx context.Context, raw string) (*Claims, error)
+
+var serviceTokenResolver ServiceTokenResolver
+
+func SetServiceTokenResolver(r ServiceTokenResolver) { serviceTokenResolver = r }
+
 func RequireUser(secret []byte) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
@@ -56,7 +65,7 @@ func RequirePermission(secret []byte, perm string, onDenied func(c *echo.Context
 }
 
 func authenticate(c *echo.Context, secret []byte) (*Claims, error) {
-	return authenticateWith(c, secret, false)
+	return authenticateWith(c, secret, false, false)
 }
 
 // authenticateWith authenticates a request using the access cookie or a
@@ -65,8 +74,17 @@ func authenticate(c *echo.Context, secret []byte) (*Claims, error) {
 // used by the proxy dispatch so apps running on service domains can hit
 // their own login/write XHRs with just the host-scoped cookie. /api/v1/*
 // callers pass false and keep the strict Bearer-only rule.
-func authenticateWith(c *echo.Context, secret []byte, allowCookieIfSameOrigin bool) (*Claims, error) {
+func authenticateWith(c *echo.Context, secret []byte, allowCookieIfSameOrigin, allowServiceToken bool) (*Claims, error) {
 	tok := bearerToken(c)
+	if tok == "" {
+		// A Service API user may present its token in a dedicated header
+		// instead of Authorization. Only service tokens are accepted here so
+		// this never widens the control-plane auth surface; the proxy-only
+		// boundary below (allowServiceToken) still applies.
+		if h := strings.TrimSpace(c.Request().Header.Get(ServiceTokenHeader)); h != "" && IsServiceAPIToken(h) {
+			tok = h
+		}
+	}
 	if tok == "" {
 		// CSRF defense: state-changing methods must carry a Bearer token.
 		// SameSite=Lax blocks cross-site cookie sends on cross-origin XHR
@@ -86,6 +104,15 @@ func authenticateWith(c *echo.Context, secret []byte, allowCookieIfSameOrigin bo
 	}
 	if tok == "" {
 		return nil, errMissingToken
+	}
+	if IsServiceAPIToken(tok) {
+		// Service tokens authenticate proxied service requests only; they are
+		// never valid on torii's own control-plane API. The proxy dispatch is
+		// the sole caller that passes allowServiceToken=true.
+		if !allowServiceToken || serviceTokenResolver == nil {
+			return nil, errMissingToken
+		}
+		return serviceTokenResolver(c.Request().Context(), tok)
 	}
 	if IsAPIToken(tok) {
 		if apiTokenResolver == nil {
@@ -128,7 +155,7 @@ func ClaimsFromRequest(c *echo.Context, secret []byte) (*Claims, error) {
 // Referer host matches the request Host), so apps running on those domains
 // can authenticate their own XHRs without a Bearer header.
 func ClaimsFromProxyRequest(c *echo.Context, secret []byte) (*Claims, error) {
-	return authenticateWith(c, secret, true)
+	return authenticateWith(c, secret, true, true)
 }
 
 // isSameOrigin reports whether the request's Origin (or Referer, when Origin

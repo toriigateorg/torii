@@ -29,6 +29,7 @@ const (
 	TargetRoleService = "role_service"
 	TargetUserRole    = "user_role"
 	TargetAPIToken    = "api_token"
+	TargetAPIUser     = "api_user"
 
 	EventSignupSuccess        = "auth.signup.success"
 	EventSignupFailed         = "auth.signup.failed"
@@ -64,6 +65,10 @@ const (
 	EventProxyDenied          = "proxy.denied"
 	EventAPITokenCreated      = "api_token.created"
 	EventAPITokenDeleted      = "api_token.deleted"
+
+	EventAPIUserCreated          = "api_user.created"
+	EventAPIUserDeleted          = "api_user.deleted"
+	EventAPIUserTokenRegenerated = "api_user.token_regenerated"
 )
 
 type Logger struct {

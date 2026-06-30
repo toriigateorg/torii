@@ -63,6 +63,7 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 
 	h := &authHandlers{pool: pool, q: db.New(pool), cfg: cfg, cache: cache, auditor: auditor}
 	auth.SetAPITokenResolver(h.resolveAPIToken)
+	auth.SetServiceTokenResolver(h.resolveServiceToken)
 
 	// authLimiter: 10 req/min/IP, burst 5. Tight because each signin/signup
 	// triggers argon2id (64 MiB, t=2) — without a limit a single attacker
@@ -121,6 +122,15 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	v1.GET("/admin/api_tokens", h.adminListAPITokens, gate(auth.PermAPITokensRead))
 	v1.POST("/admin/api_tokens", h.adminCreateAPIToken, gate(auth.PermAPITokensCreate))
 	v1.DELETE("/admin/api_tokens/:id", h.adminDeleteAPIToken, gate(auth.PermAPITokensDelete))
+
+	v1.GET("/admin/api_users", h.adminListAPIUsers, gate(auth.PermAPIUsersRead))
+	v1.POST("/admin/api_users", h.adminCreateAPIUser, gate(auth.PermAPIUsersCreate))
+	v1.GET("/admin/api_users/:id", h.adminGetAPIUser, gate(auth.PermAPIUsersRead))
+	v1.DELETE("/admin/api_users/:id", h.adminDeleteAPIUser, gate(auth.PermAPIUsersDelete))
+	v1.POST("/admin/api_users/:id/regenerate_token", h.adminRegenerateAPIUserToken, gate(auth.PermAPIUsersUpdate))
+	v1.GET("/admin/api_users/:id/roles", h.adminListAPIUserRoles, gate(auth.PermAPIUsersRead))
+	v1.POST("/admin/api_users/:id/roles", h.adminAssignAPIUserRole, gate(auth.PermAPIUsersUpdate))
+	v1.DELETE("/admin/api_users/:id/roles/:rid", h.adminRevokeAPIUserRole, gate(auth.PermAPIUsersUpdate))
 
 	v1.GET("/admin/services", h.adminListServices, gate(auth.PermServicesRead))
 	v1.POST("/admin/services", h.adminCreateService, gate(auth.PermServicesCreate))

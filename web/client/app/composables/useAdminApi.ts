@@ -198,6 +198,32 @@ export interface CreateAPITokenResponse extends APIToken {
   token: string
 }
 
+export interface APIUser {
+  id: string
+  name: string
+  description: string
+  prefix: string
+  disabled: boolean
+  created_at: string
+  expires_at: string | null
+  last_used_at: string | null
+}
+
+export interface APIUserListResponse extends PageMeta {
+  items: APIUser[]
+}
+
+export interface CreateAPIUserPayload {
+  name: string
+  description?: string
+  role_ids?: string[]
+  expires_at?: string | null
+}
+
+export interface CreateAPIUserResponse extends APIUser {
+  token: string
+}
+
 export type StatsWindow = "7d" | "30d" | "90d"
 
 export interface StatsResponse {
@@ -423,6 +449,47 @@ export function useAdminApi() {
     },
     deleteAPIToken(id: string) {
       return $fetch(`/_torii/api/v1/admin/api_tokens/${id}`, {
+        ...opts(),
+        method: "DELETE",
+      })
+    },
+    listAPIUsers(page: number, pageSize = 20) {
+      return $fetch<APIUserListResponse>("/_torii/api/v1/admin/api_users", {
+        ...opts(),
+        query: { page, page_size: pageSize },
+      })
+    },
+    createAPIUser(payload: CreateAPIUserPayload) {
+      return $fetch<CreateAPIUserResponse>("/_torii/api/v1/admin/api_users", {
+        ...opts(),
+        method: "POST",
+        body: payload,
+      })
+    },
+    deleteAPIUser(id: string) {
+      return $fetch(`/_torii/api/v1/admin/api_users/${id}`, {
+        ...opts(),
+        method: "DELETE",
+      })
+    },
+    regenerateAPIUserToken(id: string) {
+      return $fetch<CreateAPIUserResponse>(`/_torii/api/v1/admin/api_users/${id}/regenerate_token`, {
+        ...opts(),
+        method: "POST",
+      })
+    },
+    listAPIUserRoles(apiUserId: string) {
+      return $fetch<{ items: Role[] }>(`/_torii/api/v1/admin/api_users/${apiUserId}/roles`, opts())
+    },
+    assignAPIUserRole(apiUserId: string, roleId: string) {
+      return $fetch(`/_torii/api/v1/admin/api_users/${apiUserId}/roles`, {
+        ...opts(),
+        method: "POST",
+        body: { role_id: roleId },
+      })
+    },
+    revokeAPIUserRole(apiUserId: string, roleId: string) {
+      return $fetch(`/_torii/api/v1/admin/api_users/${apiUserId}/roles/${roleId}`, {
         ...opts(),
         method: "DELETE",
       })
