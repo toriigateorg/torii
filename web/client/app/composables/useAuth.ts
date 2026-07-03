@@ -63,7 +63,10 @@ export function useAuth() {
   }
 
   function authHeaders(): Record<string, string> {
-    return accessToken.value ? { Authorization: `Bearer ${accessToken.value}` } : {}
+    // torii reads its own credential from X-Torii-Authorization; the standard
+    // Authorization header is left free for upstream services behind the proxy.
+    // The value is the raw JWT (no "Bearer " prefix).
+    return accessToken.value ? { "X-Torii-Authorization": accessToken.value } : {}
   }
 
   async function signup(payload: {

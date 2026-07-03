@@ -187,9 +187,12 @@ func (h *authHandlers) adminDeleteAPIToken(c *echo.Context) error {
 }
 
 // resolveAPIToken is wired into auth.SetAPITokenResolver during Register so
-// auth.RequireUser/RequirePermission accept `Authorization: Bearer torii_pat_*`
-// in addition to JWTs. It loads the owning user's permissions and role ids and
-// returns a Claims value with the same shape as a freshly-issued access token.
+// torii's control-plane (RequireUser / RequirePermission) accepts a `torii_pat_*`
+// personal token in the X-Torii-Authorization header, in addition to session
+// JWTs. Personal tokens are control-plane only — the proxy dispatch does not
+// accept them (it takes torii_sat_ service tokens instead). It loads the owning
+// user's permissions and role ids and returns a Claims value with the same shape
+// as a freshly-issued access token.
 func (h *authHandlers) resolveAPIToken(ctx context.Context, raw string) (*auth.Claims, error) {
 	hash := auth.HashAPIToken(raw)
 	row, err := h.q.GetAPITokenByHash(ctx, hash)

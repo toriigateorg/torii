@@ -188,8 +188,8 @@ function isExpired(u: APIUser): boolean {
         <p class="text-sm text-muted-foreground mt-1">
           Passwordless machine identities. A script passes the
           <span class="font-mono">torii_sat_…</span> token in the
-          <span class="font-mono">X-Torii-Service-Token</span> header (or
-          <span class="font-mono">Authorization: Bearer</span>) to reach a service behind torii without SSO.
+          <span class="font-mono">X-Torii-Service-Token</span> header to reach a service behind torii without SSO.
+          The standard <span class="font-mono">Authorization</span> header is left untouched for the upstream's own auth.
           Access is governed by the roles you assign.
         </p>
       </div>

@@ -64,63 +64,85 @@ func RequirePermission(secret []byte, perm string, onDenied func(c *echo.Context
 	}
 }
 
-func authenticate(c *echo.Context, secret []byte) (*Claims, error) {
-	return authenticateWith(c, secret, false, false)
+// credentialPolicy describes where a caller accepts a torii credential and
+// which token types are valid there. Each token type has exactly one valid
+// header (single-home rule):
+//
+//   - control-plane (X-Torii-Authorization): session JWTs and torii_pat_
+//     personal tokens — the caller acts as a full torii user.
+//   - proxy dispatch (X-Torii-Service-Token): torii_sat_ service tokens only.
+//
+// `Authorization` is never read on either path — on service hosts it belongs to
+// the upstream and is forwarded untouched. The access cookie (always a session
+// JWT set by torii) is accepted on both paths, subject to the CSRF gate.
+type credentialPolicy struct {
+	header                  string // header the torii credential is read from
+	allowServiceToken       bool   // accept torii_sat_ in header (proxy only)
+	allowUserToken          bool   // accept torii_pat_ / JWT in header (control-plane only)
+	allowCookieIfSameOrigin bool   // accept the cookie on same-origin state-changing requests
 }
 
-// authenticateWith authenticates a request using the access cookie or a
-// Bearer token. When allowCookieIfSameOrigin is true, state-changing methods
-// may authenticate via the cookie if the request is provably same-origin —
-// used by the proxy dispatch so apps running on service domains can hit
-// their own login/write XHRs with just the host-scoped cookie. /api/v1/*
-// callers pass false and keep the strict Bearer-only rule.
-func authenticateWith(c *echo.Context, secret []byte, allowCookieIfSameOrigin, allowServiceToken bool) (*Claims, error) {
-	tok := bearerToken(c)
-	if tok == "" {
-		// A Service API user may present its token in a dedicated header
-		// instead of Authorization. Only service tokens are accepted here so
-		// this never widens the control-plane auth surface; the proxy-only
-		// boundary below (allowServiceToken) still applies.
-		if h := strings.TrimSpace(c.Request().Header.Get(ServiceTokenHeader)); h != "" && IsServiceAPIToken(h) {
-			tok = h
-		}
-	}
-	if tok == "" {
-		// CSRF defense: state-changing methods must carry a Bearer token.
-		// SameSite=Lax blocks cross-site cookie sends on cross-origin XHR
-		// but a top-level form POST still rides along — without this gate,
-		// any future endpoint accepting a non-JSON body would be CSRF-able.
-		// The SPA always sends Bearer via useAuth().authHeaders(); the
-		// cookie is purely a hydration aid for the proxy dispatch on
-		// service domains (read-only navigations).
-		if isStateChanging(c.Request().Method) && !isCookieAllowedPath(c.Request().URL.Path) {
-			if !(allowCookieIfSameOrigin && isSameOrigin(c.Request())) {
+var controlPlanePolicy = credentialPolicy{
+	header:         AuthorizationHeader,
+	allowUserToken: true,
+}
+
+var proxyPolicy = credentialPolicy{
+	header:                  ServiceTokenHeader,
+	allowServiceToken:       true,
+	allowCookieIfSameOrigin: true,
+}
+
+func authenticate(c *echo.Context, secret []byte) (*Claims, error) {
+	return authenticateWith(c, secret, controlPlanePolicy)
+}
+
+// authenticateWith authenticates a request against a credentialPolicy: a torii
+// credential in the policy's header, or the access cookie. The token type must
+// match the header (a torii_sat_ in X-Torii-Authorization, or a torii_pat_ / JWT
+// in X-Torii-Service-Token, is rejected) so each credential has a single valid
+// channel and a misplaced one is never silently honored.
+func authenticateWith(c *echo.Context, secret []byte, pol credentialPolicy) (*Claims, error) {
+	if h := strings.TrimSpace(c.Request().Header.Get(pol.header)); h != "" {
+		switch {
+		case IsServiceAPIToken(h):
+			if !pol.allowServiceToken || serviceTokenResolver == nil {
 				return nil, errMissingToken
 			}
-		}
-		if ck, err := c.Cookie(AccessCookie); err == nil {
-			tok = ck.Value
+			return serviceTokenResolver(c.Request().Context(), h)
+		case IsAPIToken(h):
+			if !pol.allowUserToken || apiTokenResolver == nil {
+				return nil, errMissingToken
+			}
+			return apiTokenResolver(c.Request().Context(), h)
+		default: // a session JWT
+			if !pol.allowUserToken {
+				return nil, errMissingToken
+			}
+			return ParseAccessToken(h, secret)
 		}
 	}
-	if tok == "" {
-		return nil, errMissingToken
-	}
-	if IsServiceAPIToken(tok) {
-		// Service tokens authenticate proxied service requests only; they are
-		// never valid on torii's own control-plane API. The proxy dispatch is
-		// the sole caller that passes allowServiceToken=true.
-		if !allowServiceToken || serviceTokenResolver == nil {
+
+	// No header credential: fall back to the access cookie, which torii only
+	// ever sets to a session JWT.
+	//
+	// CSRF defense: state-changing methods may not authenticate by cookie.
+	// SameSite=Lax blocks cross-site cookie sends on cross-origin XHR but a
+	// top-level form POST still rides along — without this gate, any future
+	// endpoint accepting a non-JSON body would be CSRF-able. The SPA always
+	// carries the credential in X-Torii-Authorization; the cookie is a hydration
+	// aid for the proxy dispatch on service domains, allowed here only when the
+	// request is provably same-origin.
+	if isStateChanging(c.Request().Method) && !isCookieAllowedPath(c.Request().URL.Path) {
+		if !(pol.allowCookieIfSameOrigin && isSameOrigin(c.Request())) {
 			return nil, errMissingToken
 		}
-		return serviceTokenResolver(c.Request().Context(), tok)
 	}
-	if IsAPIToken(tok) {
-		if apiTokenResolver == nil {
-			return nil, errors.New("api tokens not enabled")
-		}
-		return apiTokenResolver(c.Request().Context(), tok)
+	ck, err := c.Cookie(AccessCookie)
+	if err != nil || ck.Value == "" {
+		return nil, errMissingToken
 	}
-	return ParseAccessToken(tok, secret)
+	return ParseAccessToken(ck.Value, secret)
 }
 
 func isStateChanging(method string) bool {
@@ -150,12 +172,15 @@ func ClaimsFromRequest(c *echo.Context, secret []byte) (*Claims, error) {
 }
 
 // ClaimsFromProxyRequest is used by the reverse-proxy dispatch for requests
-// targeted at configured service domains. It accepts the access cookie on
-// state-changing methods provided the request is same-origin (Origin or
-// Referer host matches the request Host), so apps running on those domains
-// can authenticate their own XHRs without a Bearer header.
+// targeted at configured service domains. It does not read `Authorization`
+// (that header is forwarded untouched to the upstream); the torii credential is
+// taken from the access cookie or a torii_sat_ service token in the
+// X-Torii-Service-Token header. It accepts the access cookie on state-changing
+// methods provided the request is same-origin (Origin or Referer host matches
+// the request Host), so apps running on those domains can authenticate their
+// own XHRs from the host-scoped cookie alone.
 func ClaimsFromProxyRequest(c *echo.Context, secret []byte) (*Claims, error) {
-	return authenticateWith(c, secret, true, true)
+	return authenticateWith(c, secret, proxyPolicy)
 }
 
 // isSameOrigin reports whether the request's Origin (or Referer, when Origin
@@ -193,12 +218,4 @@ func ClaimsFrom(c *echo.Context) *Claims {
 		return claims
 	}
 	return nil
-}
-
-func bearerToken(c *echo.Context) string {
-	h := c.Request().Header.Get("Authorization")
-	if strings.HasPrefix(h, "Bearer ") {
-		return strings.TrimSpace(h[7:])
-	}
-	return ""
 }

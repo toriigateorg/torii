@@ -26,11 +26,21 @@ func NewAPIToken() (raw string, hash []byte, displayPrefix string, err error) {
 // resolvers and enforce that service tokens only authenticate proxied requests.
 const ServiceAPITokenPrefix = "torii_sat_"
 
-// ServiceTokenHeader is an alternative to `Authorization: Bearer` for presenting
-// a Service API user token, for scripts that reserve Authorization for the
-// upstream service's own auth. It is stripped before the request is proxied so
-// the token never reaches the upstream (see proxy.stripIdentityHeaders).
+// ServiceTokenHeader carries a `torii_sat_` service token when accessing an
+// upstream service through the proxy. It is the only torii credential the proxy
+// dispatch reads from a header (the client's `Authorization` is reserved for the
+// upstream). Only service tokens are accepted here — a torii_pat_ or session JWT
+// in this header is rejected. It is stripped before the request is proxied so
+// the token never reaches the upstream.
 const ServiceTokenHeader = "X-Torii-Service-Token"
+
+// AuthorizationHeader carries a torii credential when authenticating to torii's
+// own control-plane API and web UI: a session JWT or a `torii_pat_` personal
+// token (a `torii_sat_` service token is rejected — those are proxy-only).
+// torii never reads the standard `Authorization` header, so it stays free for
+// upstream services behind the proxy. Stripped before proxying so it never
+// reaches an upstream.
+const AuthorizationHeader = "X-Torii-Authorization"
 
 // NewServiceAPIToken returns a fresh plaintext service token
 // (`torii_sat_<rand>`), its sha256 hash for storage, and a short display prefix.

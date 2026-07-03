@@ -369,9 +369,10 @@ func (h *authHandlers) adminRevokeAPIUserRole(c *echo.Context) error {
 }
 
 // resolveServiceToken is wired into auth.SetServiceTokenResolver during Register
-// so the reverse-proxy dispatch accepts `Authorization: Bearer torii_sat_*` for
-// a Service API user. It loads the api user's role ids for RBAC. Permissions are
-// intentionally empty: a service token can never satisfy a control-plane gate.
+// so the reverse-proxy dispatch accepts a `torii_sat_*` service token (presented
+// in the X-Torii-Service-Token header) for a Service API user. It loads the api
+// user's role ids for RBAC. Permissions are intentionally empty: a service token
+// can never satisfy a control-plane gate.
 func (h *authHandlers) resolveServiceToken(ctx context.Context, raw string) (*auth.Claims, error) {
 	hash := auth.HashAPIToken(raw)
 	row, err := h.q.GetAPIUserByHash(ctx, hash)

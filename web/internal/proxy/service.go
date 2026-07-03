@@ -17,9 +17,11 @@ import (
 )
 
 // Identity is the authenticated caller's session, forwarded to upstream
-// services via signed X-Torii-* headers. The torii access cookie itself is
-// stripped from the proxied request so a compromised upstream cannot replay
-// the JWT against the torii API.
+// services via signed X-Torii-* headers. Torii's own credential channels (the
+// access cookie and the X-Torii-Authorization / X-Torii-Service-Token headers)
+// are stripped from the proxied request so a compromised upstream cannot replay
+// them against the torii API. The client's Authorization header is left intact
+// for the upstream's own auth.
 type Identity struct {
 	UserID   string
 	Username string
@@ -99,10 +101,14 @@ func ProxyTo(svc *CachedService, ident Identity, c *echo.Context) error {
 		// into HTML responses without having to decode gzip/br.
 		req.Header.Del("Accept-Encoding")
 
-		// Prevent the upstream from impersonating the torii user against
-		// the torii API on its own hostname (or any other host that trusts
-		// the torii access cookie / Bearer).
-		req.Header.Del("Authorization")
+		// The client's Authorization header is intentionally NOT stripped: on a
+		// proxied host it belongs to the upstream (which may use it for its own
+		// auth), and torii never reads it there — see auth.ClaimsFromProxyRequest,
+		// which sources the torii credential from X-Torii-Authorization / the
+		// access cookie instead. We do strip torii's own credential channels so a
+		// compromised upstream cannot replay them against the torii API on its own
+		// hostname (or any other host that trusts the torii access cookie).
+		req.Header.Del(auth.AuthorizationHeader)
 		req.Header.Del(auth.ServiceTokenHeader)
 		stripCookies(req, auth.AccessCookie, auth.RefreshCookie, auth.SessionCookie)
 

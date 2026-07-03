@@ -80,7 +80,7 @@ docker-compose.prod.yml      prod (bind-mounted ./audit-logs, healthcheck, APP_E
 
 ## Auth model
 
-- **Access token**: HS256 JWT, 5 min default (`ACCESS_TOKEN_EXPIRY_MINS`). Returned in JSON response body **and** as an httpOnly cookie. Client keeps it in a Vue `ref` (`useAuth().accessToken`) and sends `Authorization: Bearer <token>`.
+- **Access token**: HS256 JWT, 5 min default (`ACCESS_TOKEN_EXPIRY_MINS`). Returned in JSON response body **and** as an httpOnly cookie. Client keeps it in a Vue `ref` (`useAuth().accessToken`) and sends it in the `X-Torii-Authorization` header (torii never reads the standard `Authorization` header — that is reserved for upstream services behind the proxy).
 - **Refresh token**: 32 random bytes, base64url-encoded. Server stores only the sha256 hash in `refresh_tokens`. Delivered as an httpOnly + SameSite=Lax cookie at path `/api/v1/`, `Secure` only when `APP_ENV != "dev"`.
 - **Rotation**: every successful `/api/v1/token_refresh` deletes the old row and creates a new one. The Nuxt composable schedules a silent refresh `expires_in - 30s` after each issuance.
 - **First user is admin**: `Signup` runs `CountUsers`; if zero, the new account is created with `user_type='admin'` regardless of payload. Subsequent signups default to `user`.
@@ -92,6 +92,11 @@ docker-compose.prod.yml      prod (bind-mounted ./audit-logs, healthcheck, APP_E
 - **Service cache** (`internal/proxy/cache.go`): in-memory `map[domain]*CachedService`, refreshed on TTL (30 s) or explicit `Invalidate()` from the admin services CRUD handlers.
 - **Service config**: `domain` is hostname[:port] (no scheme/path); `service_url` is `http(s)://host[:port]` with no path/query/fragment. Both are validated server- and client-side.
 - **Auth on proxied requests**: signed-in torii user **plus** per-service RBAC — dispatch checks `svc.AllowsAnyRole(claims.RoleIDs)`. Unauthenticated document requests redirect to `/_torii/signin`; authenticated-but-no-matching-role document requests redirect to `/_torii/forbidden?service=<title>` (styled SPA page served on the service host), while XHR/asset callers get a JSON `403 {"error":"forbidden: no role grants access to this service"}`. Both denials emit an `EventProxyDenied` audit event (`reason: "unauthenticated"` / `"no_role"`).
+- **Credential headers / `Authorization` passthrough**: torii **never reads the standard `Authorization` header** on any path — on service hosts it belongs to the upstream (which may run its own auth) and is forwarded untouched. torii credentials ride in dedicated headers, one per audience, and each token type has exactly one valid home (enforced in `auth.authenticateWith` via `controlPlanePolicy` / `proxyPolicy`):
+  - **`X-Torii-Authorization`** → control-plane API + web UI. Accepts a session JWT or a `torii_pat_` personal token; a `torii_sat_` is rejected.
+  - **`X-Torii-Service-Token`** → proxy access to an upstream. Accepts a `torii_sat_` service token only; a `torii_pat_` / JWT is rejected.
+  - **`access_token` cookie** (always a session JWT) → both paths, browsers; subject to the same-origin CSRF gate on state-changing methods.
+  Both torii headers and the session cookies are stripped before proxying so they never reach an upstream. See `auth.ClaimsFromProxyRequest` and `proxy.ProxyTo`.
 - **Cross-domain login**: cookies are scoped per host, so a user must sign in once per service domain. The signin page detects non-TORII_URL hosts and does a hard `window.location.assign("/")` after success so the Go dispatch can re-evaluate and proxy.
 - **WebSockets / streaming**: handled natively by `httputil.ReverseProxy` (Connection/Upgrade headers preserved by the default director).
 
