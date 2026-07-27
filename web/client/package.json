@@ -5,7 +5,8 @@
   "scripts": {
     "build": "nuxt build",
     "dev": "nuxt dev",
-    "generate": "nuxt generate",
+    "generate": "nuxt generate && bun run verify:output",
+    "verify:output": "bun scripts/verify-output.mjs",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare"
   },

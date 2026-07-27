@@ -17,17 +17,9 @@ ENV SITE_URL=${SITE_URL}
 # Release version surfaced in the navbar (runtimeConfig.public.toriiVersion).
 ARG TORII_VERSION=dev
 ENV TORII_VERSION=${TORII_VERSION}
+# `generate` gates on scripts/verify-output.mjs, so a damaged shell fails the
+# build here rather than shipping a white page.
 RUN bun run generate
-
-# A short prerender write ships an HTML shell whose inline window.__NUXT__
-# config is cut mid-literal. The browser then throws on boot ("om() is
-# undefined") and renders nothing, with no build-time signal at all. Refuse to
-# embed a shell that doesn't close its document.
-RUN set -e; \
-    for f in $(find .output/public -name '*.html'); do \
-        tail -c 20 "$f" | grep -q '</html>' || { \
-            echo "error: truncated prerender output: $f" >&2; exit 1; }; \
-    done
 
 # ---------- Stage 2: build the Go binary with the SPA embedded ----------
 FROM golang:1.26.2-alpine AS server
