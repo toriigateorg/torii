@@ -9,9 +9,7 @@ export default defineNuxtRouteMiddleware((to) => {
   if (import.meta.client) {
     const expected = useToriiUrl()
     if (expected && window.location.host !== expected) {
-      const raw = to.query.to
-      const target = typeof raw === "string" && raw.startsWith("/") ? raw : "/"
-      window.location.assign(target)
+      window.location.assign(safeRelativePath(to.query.to))
       return abortNavigation()
     }
   }
