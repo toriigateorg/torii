@@ -8,11 +8,26 @@ import (
 	"github.com/google/uuid"
 )
 
+// Token types. Every JWT torii signs with cfg.JWTSecret carries one, and each
+// parser accepts only its own: the secret is shared across token kinds, so
+// without a type discriminator a token minted for one purpose verifies as
+// another. A handoff token, for instance, parsed cleanly as an access token
+// with empty permissions and so authenticated bare RequireUser endpoints.
+// Any new secret-signed token type MUST declare a typ here and check it.
+const (
+	TokenTypeAccess  = "access"
+	TokenTypeHandoff = "handoff"
+)
+
 type Claims struct {
 	Username    string   `json:"username"`
 	Email       string   `json:"email,omitempty"`
 	Permissions []string `json:"permissions"`
 	RoleIDs     []string `json:"role_ids"`
+	// TokenType is TokenTypeAccess on every JWT torii issues. It is empty on
+	// Claims synthesized for PAT/SAT callers, which never round-trip through
+	// ParseAccessToken.
+	TokenType string `json:"typ,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -39,6 +54,7 @@ func IssueAccessToken(userID uuid.UUID, username, email string, perms []string, 
 		Email:       email,
 		Permissions: perms,
 		RoleIDs:     roleStrs,
+		TokenType:   TokenTypeAccess,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID.String(),
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
@@ -60,6 +76,9 @@ func ParseAccessToken(token string, secret []byte) (*Claims, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+	if claims.TokenType != TokenTypeAccess {
+		return nil, errors.New("token is not an access token")
 	}
 	return claims, nil
 }

@@ -19,12 +19,16 @@ const handoffTTL = 30 * time.Second
 // the service-host /api/v1/sso_handoff endpoint exchanges it for fresh
 // session cookies on that host.
 //
-// The token is signed with the same JWT secret as access tokens, has a very
-// short TTL (30s), is bound to a specific target host so it can only be
-// consumed at the destination it was minted for, and carries a random jti that
-// ConsumeHandoffJTI burns on first use.
+// The token is signed with the same JWT secret as access tokens, so it declares
+// typ=handoff and ParseAccessToken rejects it — otherwise it verified as an
+// access token (with empty permissions) and authenticated bare RequireUser
+// endpoints on the control-plane host. It also has a very short TTL (30s), is
+// bound to a specific target host so it can only be consumed at the destination
+// it was minted for, and carries a random jti that ConsumeHandoffJTI burns on
+// first use.
 type HandoffClaims struct {
 	TargetHost string `json:"target_host"`
+	TokenType  string `json:"typ"`
 	jwt.RegisteredClaims
 }
 
@@ -33,6 +37,7 @@ type HandoffClaims struct {
 func IssueHandoffToken(userID uuid.UUID, targetHost string, secret []byte) (string, error) {
 	claims := HandoffClaims{
 		TargetHost: targetHost,
+		TokenType:  TokenTypeHandoff,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ID:        uuid.NewString(),
 			Subject:   userID.String(),
@@ -58,6 +63,9 @@ func ParseHandoffToken(token string, secret []byte) (*HandoffClaims, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+	if claims.TokenType != TokenTypeHandoff {
+		return nil, errors.New("token is not a handoff token")
 	}
 	if claims.TargetHost == "" {
 		return nil, errors.New("handoff token missing target_host")

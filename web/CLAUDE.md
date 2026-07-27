@@ -80,6 +80,7 @@ docker-compose.prod.yml      prod (bind-mounted ./audit-logs, healthcheck, APP_E
 
 ## Auth model
 
+- **Token types**: every JWT signed with `JWT_SECRET` carries a `typ` claim (`auth.TokenTypeAccess` / `auth.TokenTypeHandoff`) and each parser accepts only its own. The secret is shared across kinds, so without it a handoff token verified as an access token. Any new secret-signed token type must declare a `typ` and check it.
 - **Access token**: HS256 JWT, 5 min default (`ACCESS_TOKEN_EXPIRY_MINS`). Returned in JSON response body **and** as an httpOnly cookie. Client keeps it in a Vue `ref` (`useAuth().accessToken`) and sends it in the `X-Torii-Authorization` header (torii never reads the standard `Authorization` header — that is reserved for upstream services behind the proxy).
 - **Refresh token**: 32 random bytes, base64url-encoded. Server stores only the sha256 hash in `refresh_tokens`. Delivered as an httpOnly + SameSite=Lax cookie at path `/api/v1/`, `Secure` only when `APP_ENV != "dev"`.
 - **Rotation**: every successful `/api/v1/token_refresh` deletes the old row and creates a new one. The Nuxt composable schedules a silent refresh `expires_in - 30s` after each issuance.
