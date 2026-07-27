@@ -75,6 +75,28 @@ func IsSafeUpstreamAddr(address string, blockLoopback bool) error {
 	return nil
 }
 
+// imdsIPv6Net is fd00:ec2::/32, which holds fd00:ec2::254 — the IPv6 endpoint
+// of the AWS instance metadata service. It sits inside ULA (fc00::/7), which
+// torii allows on purpose because that's where legitimate internal upstreams
+// live, so it has to be denied explicitly.
+//
+// nat64WellKnownNet is 64:ff9b::/96 (RFC 6052). On a NAT64 network the last
+// four bytes are an embedded IPv4 address the packet is translated to, so
+// 64:ff9b::a9fe:a9fe reaches 169.254.169.254. To4 does not decode this form,
+// so without unwrapping it the v4 deny set never sees the real destination.
+var (
+	imdsIPv6Net       = mustCIDR("fd00:ec2::/32")
+	nat64WellKnownNet = mustCIDR("64:ff9b::/96")
+)
+
+func mustCIDR(s string) *net.IPNet {
+	_, n, err := net.ParseCIDR(s)
+	if err != nil {
+		panic("netutil: bad CIDR " + s)
+	}
+	return n
+}
+
 func unsafeReason(ip net.IP, blockLoopback bool) string {
 	switch {
 	case ip.IsUnspecified():
@@ -85,6 +107,19 @@ func unsafeReason(ip net.IP, blockLoopback bool) string {
 		return "multicast"
 	case blockLoopback && ip.IsLoopback():
 		return "loopback"
+	case imdsIPv6Net.Contains(ip):
+		return "cloud metadata over IPv6"
+	}
+	// NAT64-embedded IPv4: re-run the deny set against the address the packet
+	// is actually translated to. Only for real v6 forms — To4 already handles
+	// ::ffff:0:0/96 IPv4-mapped addresses.
+	if ip.To4() == nil && nat64WellKnownNet.Contains(ip) {
+		if v6 := ip.To16(); v6 != nil {
+			embedded := net.IPv4(v6[12], v6[13], v6[14], v6[15])
+			if reason := unsafeReason(embedded, blockLoopback); reason != "" {
+				return reason + ", NAT64-embedded " + embedded.String()
+			}
+		}
 	}
 	return ""
 }
