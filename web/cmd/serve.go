@@ -157,7 +157,11 @@ func runInner(ctx context.Context, host string, port int) error {
 
 	e := echo.New()
 	if cfg != nil {
-		configureIPExtractor(e, cfg.TrustedProxyCIDRs)
+		// One trusted-proxy set, read by both RealIP() and the proxy's
+		// X-Forwarded-Proto handling.
+		trusted := proxy.ParseTrustedCIDRs(cfg.TrustedProxyCIDRs)
+		proxy.SetTrustedProxies(trusted)
+		configureIPExtractor(e, trusted)
 	}
 	const (
 		defaultReadTimeout  = 30 * time.Second

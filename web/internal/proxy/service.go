@@ -30,15 +30,65 @@ type Identity struct {
 	Roles    []string
 }
 
-// torii-owned headers that must never be passed through from the client to
-// the upstream. We re-set them ourselves below.
-var stripIdentityHeaders = []string{
-	"X-Torii-User",
-	"X-Torii-Username",
-	"X-Torii-Email",
-	"X-Torii-Roles",
-	"X-Torii-Issued-At",
-	"X-Torii-Signature",
+// toriiOwnedHeaders are the headers torii asserts itself, in normalized form
+// (lowercase, underscores folded to dashes). Every inbound spelling is dropped
+// before the director re-sets the canonical dash form, so a client can never
+// contribute one.
+//
+// Normalizing rather than matching exact names matters: Go treats
+// "X_Torii_Roles" as a header distinct from "X-Torii-Roles" and passes it
+// through untouched, but an upstream behind nginx with underscores_in_headers,
+// or any CGI/PHP app folding "_" to "-", would read it as the roles assertion.
+var toriiOwnedHeaders = map[string]struct{}{
+	"x-torii-user":          {},
+	"x-torii-username":      {},
+	"x-torii-email":         {},
+	"x-torii-roles":         {},
+	"x-torii-issued-at":     {},
+	"x-torii-signature":     {},
+	"x-torii-authorization": {}, // auth.AuthorizationHeader
+	"x-torii-service-token": {}, // auth.ServiceTokenHeader
+}
+
+// shadowableForwardedHeaders are set authoritatively by torii (X-Forwarded-Host
+// / -Proto) or appended by ReverseProxy (X-Forwarded-For). Only underscore
+// spellings are dropped: the dash forms are torii's own output, and discarding
+// an inbound X-Forwarded-For would throw away a trusted proxy's client chain
+// before ReverseProxy appends to it.
+var shadowableForwardedHeaders = map[string]struct{}{
+	"x-forwarded-for":   {},
+	"x-forwarded-host":  {},
+	"x-forwarded-proto": {},
+}
+
+// Fail at startup rather than silently forwarding a credential header if one of
+// the auth package's header names is ever renamed out from under the strip list.
+func init() {
+	for _, h := range []string{auth.AuthorizationHeader, auth.ServiceTokenHeader} {
+		if _, ok := toriiOwnedHeaders[normalizeHeaderName(h)]; !ok {
+			panic("proxy: " + h + " is missing from toriiOwnedHeaders")
+		}
+	}
+}
+
+func normalizeHeaderName(k string) string {
+	return strings.ToLower(strings.ReplaceAll(k, "_", "-"))
+}
+
+// stripClientHeaders removes every inbound spelling of the headers torii owns.
+func stripClientHeaders(h http.Header) {
+	for k := range h {
+		n := normalizeHeaderName(k)
+		if _, owned := toriiOwnedHeaders[n]; owned {
+			delete(h, k)
+			continue
+		}
+		if strings.Contains(k, "_") {
+			if _, shadow := shadowableForwardedHeaders[n]; shadow {
+				delete(h, k)
+			}
+		}
+	}
 }
 
 // ProxyTo reverse-proxies the request to the cached service's target. It
@@ -48,8 +98,14 @@ var stripIdentityHeaders = []string{
 func ProxyTo(svc *CachedService, ident Identity, c *echo.Context) error {
 	inbound := c.Request()
 	origHost := inbound.Host
+	// Client-facing scheme. Derived from the connection; the inbound
+	// X-Forwarded-Proto is only consulted when the peer is a configured trusted
+	// proxy, because any client can set it and upstreams build absolute links
+	// and redirects from what we forward.
 	origProto := "http"
-	if inbound.TLS != nil || strings.EqualFold(inbound.Header.Get("X-Forwarded-Proto"), "https") {
+	if inbound.TLS != nil {
+		origProto = "https"
+	} else if PeerIsTrustedProxy(inbound) && strings.EqualFold(inbound.Header.Get("X-Forwarded-Proto"), "https") {
 		origProto = "https"
 	}
 
@@ -117,22 +173,19 @@ func ProxyTo(svc *CachedService, ident Identity, c *echo.Context) error {
 		// into HTML responses without having to decode gzip/br.
 		req.Header.Del("Accept-Encoding")
 
+		// Drop every torii-owned header the client may have sent — the identity
+		// assertions (so we control them end-to-end) and torii's own credential
+		// channels (so a compromised upstream cannot replay them against the
+		// torii API on its own hostname, or any host that trusts the access
+		// cookie). Underscore spellings included; see toriiOwnedHeaders.
+		//
 		// The client's Authorization header is intentionally NOT stripped: on a
 		// proxied host it belongs to the upstream (which may use it for its own
 		// auth), and torii never reads it there — see auth.ClaimsFromProxyRequest,
 		// which sources the torii credential from X-Torii-Authorization / the
-		// access cookie instead. We do strip torii's own credential channels so a
-		// compromised upstream cannot replay them against the torii API on its own
-		// hostname (or any other host that trusts the torii access cookie).
-		req.Header.Del(auth.AuthorizationHeader)
-		req.Header.Del(auth.ServiceTokenHeader)
+		// access cookie instead.
+		stripClientHeaders(req.Header)
 		stripCookies(req, auth.AccessCookie, auth.RefreshCookie, auth.SessionCookie)
-
-		// Reject any inbound X-Torii-* a client might have set so we control
-		// the identity assertion end-to-end.
-		for _, h := range stripIdentityHeaders {
-			req.Header.Del(h)
-		}
 
 		issuedAt := strconv.FormatInt(time.Now().Unix(), 10)
 		roles := strings.Join(ident.Roles, ",")

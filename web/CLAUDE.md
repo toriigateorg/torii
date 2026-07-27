@@ -81,7 +81,7 @@ docker-compose.prod.yml      prod (bind-mounted ./audit-logs, healthcheck, APP_E
 ## Auth model
 
 - **Token types**: every JWT signed with `JWT_SECRET` carries a `typ` claim (`auth.TokenTypeAccess` / `auth.TokenTypeHandoff`) and each parser accepts only its own. The secret is shared across kinds, so without it a handoff token verified as an access token. Any new secret-signed token type must declare a `typ` and check it.
-- **Access token**: HS256 JWT, 5 min default (`ACCESS_TOKEN_EXPIRY_MINS`). Returned in JSON response body **and** as an httpOnly cookie. Client keeps it in a Vue `ref` (`useAuth().accessToken`) and sends it in the `X-Torii-Authorization` header (torii never reads the standard `Authorization` header — that is reserved for upstream services behind the proxy).
+- **Access token**: HS256 JWT, 1 min default (`ACCESS_TOKEN_EXPIRY_MINS`). Permissions and roles are a snapshot taken at issuance, so a revoked role keeps working until the token expires — that lag is exactly this TTL, which is why it's short. Returned in JSON response body **and** as an httpOnly cookie. Client keeps it in a Vue `ref` (`useAuth().accessToken`) and sends it in the `X-Torii-Authorization` header (torii never reads the standard `Authorization` header — that is reserved for upstream services behind the proxy).
 - **Refresh token**: 32 random bytes, base64url-encoded. Server stores only the sha256 hash in `refresh_tokens`. Delivered as an httpOnly + SameSite=Lax cookie at path `/api/v1/`, `Secure` only when `APP_ENV != "dev"`.
 - **Rotation**: every successful `/api/v1/token_refresh` deletes the old row and creates a new one. The Nuxt composable schedules a silent refresh `expires_in - 30s` after each issuance.
 - **First user is admin**: `Signup` runs `CountUsers`; if zero, the new account is created with `user_type='admin'` regardless of payload. Subsequent signups default to `user`.
@@ -99,6 +99,8 @@ docker-compose.prod.yml      prod (bind-mounted ./audit-logs, healthcheck, APP_E
   - **`X-Torii-Service-Token`** → proxy access to an upstream. Accepts a `torii_sat_` service token only; a `torii_pat_` / JWT is rejected.
   - **`access_token` cookie** (always a session JWT) → both paths, browsers; subject to the same-origin CSRF gate on state-changing methods.
   Both torii headers and the session cookies are stripped before proxying so they never reach an upstream. See `auth.ClaimsFromProxyRequest` and `proxy.ProxyTo`.
+- **Inbound header hygiene** (`proxy.stripClientHeaders`): every torii-owned header — the `X-Torii-*` identity assertions and both credential headers — is dropped from the client's request by *normalized* name (lowercase, `_` folded to `-`), so `X_Torii_Roles` can't survive to an upstream that folds underscores (nginx `underscores_in_headers`, CGI/PHP). Underscore spellings of `X-Forwarded-{For,Host,Proto}` are dropped too; the dash forms are torii's own output.
+- **Trusted proxies** (`internal/proxy/trust.go`): `TRUSTED_PROXY_CIDRS` gates every `X-Forwarded-*` fact torii consumes. `RealIP()` honors XFF only from a trusted peer, and the client-facing scheme forwarded upstream as `X-Forwarded-Proto` comes from `inbound.TLS`, consulting the inbound header only from a trusted peer. With no CIDRs configured, nothing is trusted.
 - **Cross-domain login**: cookies are scoped per host, so a user must sign in once per service domain. The signin page detects non-TORII_URL hosts and does a hard `window.location.assign("/")` after success so the Go dispatch can re-evaluate and proxy.
 - **WebSockets / streaming**: handled natively by `httputil.ReverseProxy` (Connection/Upgrade headers preserved by the default director). Deadlines are only cleared once the upstream answers `101` — a request that merely *claims* `Connection: Upgrade` gets a bounded handshake window (`upgradeHandshakeWindow`, 30s) so client headers alone can't opt out of every timeout. Concurrent hijacked connections are capped per account (`maxUpgradesPerUser`, 32); over the cap torii answers 429.
 
@@ -108,7 +110,7 @@ docker-compose.prod.yml      prod (bind-mounted ./audit-logs, healthcheck, APP_E
 | --- | --- | --- |
 | `APP_ENV` | `dev` | anything else (`production`, `prod`, `staging`) flips: strong-password validation on signup, Secure cookies, no Nuxt subprocess, embed-served SPA |
 | `JWT_SECRET` | *(required)* | HS256 secret, 32+ chars |
-| `ACCESS_TOKEN_EXPIRY_MINS` | `5` | |
+| `ACCESS_TOKEN_EXPIRY_MINS` | `1` | Also bounds how long a revoked role or permission keeps working (claims are snapshotted into the JWT). |
 | `REFRESH_TOKEN_EXPIRY_DAYS` | `7` | |
 | `DATABASE_URL` | *(required)* | pgx connection string |
 | `API_HOST` | `0.0.0.0` | |
