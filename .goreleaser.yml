@@ -5,11 +5,20 @@ project_name: torii
 before:
   hooks:
     - sh -c "cd web/client && bun install --frozen-lockfile"
+    # `docker compose build` gets a pristine client tree for free — .dockerignore
+    # drops these. goreleaser instead generates in place on the bind-mounted
+    # repo, where the previous run's .output/.nuxt and the absolute `dist`
+    # symlink Nuxt leaves behind (dangling in this container) all survive.
+    # Generating over that stages a short index.html: right size, data cut mid
+    # `window.__NUXT__.config` literal, tail NUL-padded, SPA dead on boot.
+    - sh -c "cd web/client && rm -rf .output .nuxt dist"
     # TORII_VERSION (set by `just release`) is read by nuxt.config.ts via
     # process.env so the navbar reflects the release tag.
     - sh -c "cd web/client && bun run generate"
     - sh -c "rm -rf web/internal/web/dist && mkdir -p web/internal/web/dist"
     - sh -c "cp -r web/client/.output/public/. web/internal/web/dist/"
+    # `generate` gates its own output; this gates what actually gets embedded.
+    - sh -c "bun web/client/scripts/verify-output.mjs web/internal/web/dist"
 
 builds:
   - id: torii
