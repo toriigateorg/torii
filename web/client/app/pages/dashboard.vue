@@ -9,7 +9,6 @@ type Service = {
   title: string
   description: string
   domain: string
-  service_url: string
 }
 
 const { authHeaders } = useAuth()

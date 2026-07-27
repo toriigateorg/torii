@@ -9,6 +9,18 @@ import (
 	"torii/internal/auth"
 )
 
+// myServiceDTO is the public view of a service: presentation fields plus the
+// domain the user browses to. Deliberately NOT the admin serviceDTO — that one
+// carries the per-service header overlay (which by design holds upstream
+// credentials) and the internal service_url, neither of which any signed-in
+// user should be able to read.
+type myServiceDTO struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Domain      string `json:"domain"`
+}
+
 func (h *authHandlers) myServices(c *echo.Context) error {
 	claims := auth.ClaimsFrom(c)
 	if claims == nil {
@@ -22,9 +34,14 @@ func (h *authHandlers) myServices(c *echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not list services"})
 	}
-	items := make([]serviceDTO, 0, len(rows))
+	items := make([]myServiceDTO, 0, len(rows))
 	for _, r := range rows {
-		items = append(items, toServiceDTO(r))
+		items = append(items, myServiceDTO{
+			ID:          r.ID.String(),
+			Title:       r.Title,
+			Description: r.Description,
+			Domain:      r.Domain,
+		})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"items": items})
 }
