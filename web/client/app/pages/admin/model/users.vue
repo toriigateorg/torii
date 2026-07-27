@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Plus, Trash2, ShieldCheck, Search, X } from "lucide-vue-next"
+import { Plus, Trash2, ShieldCheck, Search, X, LockOpen } from "lucide-vue-next"
 import { watchDebounced } from "@vueuse/core"
 import type { AuthUser } from "~/composables/useAuth"
 import type { CreateUserPayload, Role } from "~/composables/useAdminApi"
@@ -144,6 +144,26 @@ function isSelf(u: AuthUser) {
   return currentUser.value?.id === u.id
 }
 
+function isLocked(u: AuthUser) {
+  return !!u.locked_until && new Date(u.locked_until).getTime() > Date.now()
+}
+
+const unlocking = ref<string | null>(null)
+
+async function unlockUser(u: AuthUser) {
+  unlocking.value = u.id
+  error.value = null
+  try {
+    await api.unlockUser(u.id)
+    await load()
+  } catch (e: unknown) {
+    const err = e as { data?: { error?: string }; message?: string }
+    error.value = err?.data?.error ?? err?.message ?? "Failed to unlock user"
+  } finally {
+    unlocking.value = null
+  }
+}
+
 async function openRoles(u: AuthUser) {
   rolesTarget.value = u
   rolesError.value = null
@@ -249,7 +269,10 @@ async function toggleRole(role: Role) {
             </TableCell>
           </TableRow>
           <TableRow v-for="u in items" :key="u.id">
-            <TableCell class="font-mono text-xs">{{ u.username }}</TableCell>
+            <TableCell class="font-mono text-xs">
+              {{ u.username }}
+              <Badge v-if="isLocked(u)" variant="secondary" class="ml-1.5 font-mono text-[10px]">locked</Badge>
+            </TableCell>
             <TableCell class="font-mono text-xs break-all">{{ u.email }}</TableCell>
             <TableCell>{{ [u.first_name, u.last_name].filter(Boolean).join(" ") || "—" }}</TableCell>
             <TableCell>
@@ -264,6 +287,18 @@ async function toggleRole(role: Role) {
               </div>
             </TableCell>
             <TableCell class="text-right">
+              <Button
+                v-if="isLocked(u)"
+                variant="ghost"
+                size="icon"
+                class="size-8"
+                :disabled="unlocking === u.id"
+                :title="`Unlock ${u.username}`"
+                :aria-label="`Unlock ${u.username}`"
+                @click="unlockUser(u)"
+              >
+                <LockOpen class="size-4" aria-hidden="true" />
+              </Button>
               <Button
                 variant="ghost"
                 size="icon"

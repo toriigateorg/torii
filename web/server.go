@@ -23,6 +23,7 @@ func main() {
 			cmd.Serve(),
 			cmd.Migrate(),
 			cmd.Audit(),
+			cmd.Users(),
 		},
 	}
 

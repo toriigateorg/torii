@@ -274,6 +274,12 @@ export function useAdminApi() {
         method: "DELETE",
       })
     },
+    unlockUser(id: string) {
+      return $fetch(`/_torii/api/v1/admin/users/${id}/unlock`, {
+        ...opts(),
+        method: "POST",
+      })
+    },
     listUserRoles(userId: string) {
       return $fetch<{ items: Role[] }>(`/_torii/api/v1/admin/users/${userId}/roles`, opts())
     },

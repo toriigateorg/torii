@@ -47,9 +47,17 @@ SET password_hash = $2,
 WHERE id = $1;
 
 -- name: IncrementFailedLogin :one
+-- A failure arriving after a lockout has already elapsed starts a fresh window
+-- rather than extending the old one. Extending meant a single wrong password
+-- every 15 minutes kept an account locked forever, so any unauthenticated
+-- caller could permanently deny password login to any account, admins included.
 UPDATE users
-SET failed_login_count = failed_login_count + 1,
+SET failed_login_count = CASE
+        WHEN locked_until IS NOT NULL AND locked_until <= now() THEN 1
+        ELSE failed_login_count + 1
+    END,
     locked_until = CASE
+        WHEN locked_until IS NOT NULL AND locked_until <= now() THEN NULL
         WHEN failed_login_count + 1 >= 10 THEN now() + interval '15 minutes'
         ELSE locked_until
     END,

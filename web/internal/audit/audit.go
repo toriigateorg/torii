@@ -40,6 +40,7 @@ const (
 	EventPasswordChanged      = "auth.password.changed"
 	EventPasswordResetByAdmin = "auth.password.reset_by_admin"
 	EventSessionsRevoked      = "auth.sessions.revoked_by_admin"
+	EventLockoutCleared       = "auth.lockout.cleared"
 	EventTokenRefreshFailed   = "auth.token_refresh.failed"
 	EventAuthzDenied          = "authz.denied"
 	EventUserCreated          = "rbac.user.created"

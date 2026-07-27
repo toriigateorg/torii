@@ -85,6 +85,7 @@ docker-compose.prod.yml      prod (bind-mounted ./audit-logs, healthcheck, APP_E
 - **Rotation**: every successful `/api/v1/token_refresh` deletes the old row and creates a new one. The Nuxt composable schedules a silent refresh `expires_in - 30s` after each issuance.
 - **First user is admin**: `Signup` runs `CountUsers`; if zero, the new account is created with `user_type='admin'` regardless of payload. Subsequent signups default to `user`.
 - **Self-protection on admin endpoints**: admins cannot delete themselves or revoke their own current refresh token (server compares sha256 of caller's refresh cookie to row hash).
+- **Failed-login lockout**: 10 failures locks password signin for 15 min (`users.failed_login_count` / `locked_until`). A failure arriving after the window lapsed starts a fresh count instead of extending the lock — extending let one wrong password every 15 min deny an account (or every admin) forever. Clear a lock via `POST /api/v1/admin/users/:id/unlock` (`users:update`) or, if every admin is locked out, `torii users unlock <username|email>`. SSO signin doesn't consult the lock.
 
 ## Reverse proxy
 
@@ -145,6 +146,11 @@ torii migrate up        # via docker: docker compose run --rm app torii migrate 
 Prune audit logs:
 ```
 torii audit prune --days 90
+```
+
+Clear a failed-login lockout (escape hatch when no admin can sign in):
+```
+torii users unlock <username|email>
 ```
 
 Add a shadcn-vue component (in `client/`):

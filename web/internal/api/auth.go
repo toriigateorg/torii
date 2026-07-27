@@ -49,6 +49,9 @@ type userDTO struct {
 	// SsoOnly is true when the account has no password hash and can therefore
 	// only authenticate through an SSO provider.
 	SsoOnly bool `json:"sso_only"`
+	// LockedUntil is set only while a failed-login lockout is in effect, so the
+	// admin UI can show which accounts need unlocking.
+	LockedUntil *time.Time `json:"locked_until,omitempty"`
 }
 
 func toDTO(u db.User, roles []roleSummary, perms []string) userDTO {
@@ -58,7 +61,13 @@ func toDTO(u db.User, roles []roleSummary, perms []string) userDTO {
 	if perms == nil {
 		perms = []string{}
 	}
+	var lockedUntil *time.Time
+	if u.LockedUntil.Valid && time.Now().Before(u.LockedUntil.Time) {
+		t := u.LockedUntil.Time
+		lockedUntil = &t
+	}
 	return userDTO{
+		LockedUntil: lockedUntil,
 		ID:          u.ID.String(),
 		Username:    u.Username,
 		Email:       u.Email,

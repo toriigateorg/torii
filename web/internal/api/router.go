@@ -160,6 +160,7 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	v1.DELETE("/admin/users/:id", h.adminDeleteUser, gate(auth.PermUsersDelete))
 	v1.POST("/admin/users/:id/password", h.adminResetUserPassword, gate(auth.PermUsersUpdate))
 	v1.POST("/admin/users/:id/revoke_sessions", h.adminRevokeUserSessions, gate(auth.PermUsersUpdate))
+	v1.POST("/admin/users/:id/unlock", h.adminUnlockUser, gate(auth.PermUsersUpdate))
 	v1.GET("/admin/users/:id/roles", h.adminListUserRoles, gate(auth.PermUserRolesRead))
 	v1.POST("/admin/users/:id/roles", h.adminAssignUserRole, gate(auth.PermUserRolesCreate))
 	v1.DELETE("/admin/users/:id/roles/:rid", h.adminRevokeUserRole, gate(auth.PermUserRolesDelete))

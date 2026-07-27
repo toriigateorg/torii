@@ -11,6 +11,8 @@ export interface AuthUser {
   last_name: string
   roles: RoleSummary[]
   permissions: string[]
+  // Present only while a failed-login lockout is in effect.
+  locked_until?: string
 }
 
 interface TokenResponse {

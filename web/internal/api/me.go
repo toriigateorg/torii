@@ -158,3 +158,33 @@ func (h *authHandlers) adminRevokeUserSessions(c *echo.Context) error {
 	})
 	return c.NoContent(http.StatusNoContent)
 }
+
+// adminUnlockUser clears a failed-login lockout. Without it the only way out of
+// a lockout is waiting for the window to lapse without another failed attempt,
+// which an attacker can prevent indefinitely. If every admin is locked out at
+// once, `torii users unlock` is the offline equivalent.
+func (h *authHandlers) adminUnlockUser(c *echo.Context) error {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid id"})
+	}
+	ctx := c.Request().Context()
+	user, err := h.q.GetUserByID(ctx, id)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "user not found"})
+	}
+	if err := h.q.ResetFailedLogin(ctx, id); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:  audit.EventLockoutCleared,
+		TargetType: audit.TargetUser,
+		TargetID:   &id,
+		TargetName: user.Username,
+		Metadata: map[string]any{
+			"via":                "admin_api",
+			"failed_login_count": user.FailedLoginCount,
+		},
+	})
+	return c.NoContent(http.StatusNoContent)
+}
