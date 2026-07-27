@@ -98,6 +98,22 @@ func (h *authHandlers) adminResetUserPassword(c *echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "user not found"})
 	}
+	if ok, err := h.callerOutranksTarget(ctx, auth.ClaimsFrom(c), id); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	} else if !ok {
+		h.auditor.LogFromEcho(c, audit.Event{
+			EventType:  audit.EventAuthzDenied,
+			TargetType: audit.TargetUser,
+			TargetID:   &id,
+			TargetName: user.Username,
+			Metadata: map[string]any{
+				"reason": "target holds permissions the caller lacks",
+				"path":   c.Request().URL.Path,
+				"method": c.Request().Method,
+			},
+		})
+		return c.JSON(http.StatusForbidden, map[string]string{"error": "forbidden: cannot reset the password of a more privileged user"})
+	}
 	hash, err := auth.HashPassword(req.New)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})

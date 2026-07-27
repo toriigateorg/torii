@@ -185,6 +185,34 @@ func (h *authHandlers) adminDeleteUser(c *echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+// callerOutranksTarget reports whether the caller's own permission set is a
+// superset of the target user's. Without it, a delegated operator holding a
+// single write permission (users.update) could act on an account more
+// privileged than their own — resetting an admin's password and then signing
+// in as them, since signin loads the target's live roles into the JWT.
+func (h *authHandlers) callerOutranksTarget(ctx context.Context, claims *auth.Claims, targetID uuid.UUID) (bool, error) {
+	if claims == nil {
+		return false, nil
+	}
+	if claims.Subject == targetID.String() {
+		return true, nil
+	}
+	targetPerms, err := h.q.GetUserPermissions(ctx, targetID)
+	if err != nil {
+		return false, err
+	}
+	held := make(map[string]struct{}, len(claims.Permissions))
+	for _, p := range claims.Permissions {
+		held[p] = struct{}{}
+	}
+	for _, p := range targetPerms {
+		if _, ok := held[p]; !ok {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func (h *authHandlers) userIsSoleAdmin(ctx context.Context, userID uuid.UUID) (bool, error) {
 	roles, err := h.q.ListUserRoles(ctx, userID)
 	if err != nil {
