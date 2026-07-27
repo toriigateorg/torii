@@ -28,7 +28,16 @@ func securityHeaders(cfg *config.Config) echo.MiddlewareFunc {
 			h := c.Response().Header()
 			h.Set("X-Content-Type-Options", "nosniff")
 			h.Set("X-Frame-Options", "DENY")
-			h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+			// The handoff page carries a live session-minting token in its
+			// fragment. Fragments aren't sent in a Referer, but the page also
+			// hard-navigates into proxied upstream paths right after, so pin
+			// it to no-referrer and keep it out of caches.
+			if path == "/_torii/handoff" {
+				h.Set("Referrer-Policy", "no-referrer")
+				h.Set("Cache-Control", "no-store")
+			} else {
+				h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+			}
 			if cfg != nil && cfg.IsProd() {
 				h.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
 			}

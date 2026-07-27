@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -26,13 +27,61 @@ type SessionRefresher interface {
 	AttemptCookieRefresh(c *echo.Context) (*auth.Claims, error)
 }
 
+const apiPrefix = "/_torii/api/v1"
+
+// crossHostEndpoints are the only API paths answered on a proxied service host.
+// A service host needs exactly enough of the API to get a user signed in there
+// (cookies are host-scoped, so the flow reruns per domain) and to keep the
+// signin / forbidden pages functional. Everything else — the whole /admin
+// surface above all — is control plane and belongs to TORII_URL only.
+var crossHostEndpoints = map[string]struct{}{
+	"/health":               {},
+	"/ht/":                  {},
+	"/signin":               {},
+	"/signup":               {},
+	"/logout":               {},
+	"/token_refresh":        {},
+	"/refresh_and_redirect": {},
+	"/sso_handoff":          {},
+	"/me":                   {},
+	"/auth/config":          {},
+	"/auth/providers":       {},
+}
+
+// controlPlaneHostGate 404s control-plane endpoints on any host other than
+// TORII_URL. Without it the entire API answers on every proxied domain, and
+// since the access cookie is host-scoped at Path=/ and cookie auth is only
+// CSRF-gated on state-changing methods, script running on an upstream origin
+// (an XSS in that app, or a hostile upstream) could read the full admin GET
+// surface as the signed-in victim. Scoping the routes removes the reachability
+// rather than relying on the per-request credential checks.
+func controlPlaneHostGate(cfg *config.Config) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			if cfg == nil || cfg.IsToriiHost(c.Request().Host) {
+				return next(c)
+			}
+			path := strings.TrimPrefix(c.Request().URL.Path, apiPrefix)
+			if _, ok := crossHostEndpoints[path]; ok {
+				return next(c)
+			}
+			// OAuth start/callback are per-provider and must work on the
+			// service host the user landed on.
+			if strings.HasPrefix(path, "/oauth/") {
+				return next(c)
+			}
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "not found"})
+		}
+	}
+}
+
 // Register mounts the /_torii/api/v1 routes on the given echo instance and
 // returns a SessionRefresher (nil when no DB pool / config is wired).
 func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logger) SessionRefresher {
 	// torii's own control-plane API only ever takes small JSON payloads, so
 	// keep it pinned at 1 MiB. Proxied upstream traffic is NOT mounted here —
 	// it's governed per-service via Service.MaxBodySize in the proxy path.
-	v1 := e.Group("/_torii/api/v1", middleware.BodyLimit(1<<20))
+	v1 := e.Group("/_torii/api/v1", middleware.BodyLimit(1<<20), controlPlaneHostGate(cfg))
 
 	v1.GET("/health", func(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{
@@ -168,10 +217,11 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	v1.GET("/auth/providers", h.publicListProviders)
 	v1.GET("/oauth/:slug/start", h.oauthStart, ssoLimiter)
 	v1.GET("/oauth/:slug/callback", h.oauthCallback, ssoLimiter)
-	// Cross-host SSO handoff: lands on a service domain, exchanges a
-	// short-lived torii-signed token for cookies on that host. Reachable
-	// on any host because that's the whole point.
-	v1.GET("/sso_handoff", h.ssoHandoff, refreshLimiter)
+	// Cross-host SSO handoff: called from the handoff page on a service
+	// domain, exchanges a short-lived single-use torii-signed token for
+	// cookies on that host. Reachable on any host because that's the whole
+	// point. POST-only so the token stays out of URLs and Referers.
+	v1.POST("/sso_handoff", h.ssoHandoff, refreshLimiter)
 
 	return h
 }

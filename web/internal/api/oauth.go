@@ -351,6 +351,12 @@ func (h *authHandlers) oauthCallback(c *echo.Context) error {
 	// a one-shot signed token so they end up authenticated on the host
 	// they came from rather than stranded on torii's dashboard. The cookie
 	// was set in /start; isKnownServiceHost was already enforced there.
+	//
+	// The token rides in the URL fragment, not the query: fragments are
+	// never sent to a server, never logged, and never appear in a Referer.
+	// The handoff SPA page on the service host reads it out of the hash and
+	// POSTs it to /sso_handoff. Carrying it in the query would leak the live
+	// token to the upstream via the Referer of the post-handoff navigation.
 	if rh, err := c.Cookie(ssoReturnHostCookie); err == nil && rh.Value != "" {
 		h.clearSSOTempCookie(c, ssoReturnHostCookie)
 		if h.isKnownServiceHost(ctx, rh.Value) {
@@ -360,42 +366,60 @@ func (h *authHandlers) oauthCallback(c *echo.Context) error {
 				if !h.cfg.IsProd() {
 					scheme = "http"
 				}
-				return c.Redirect(http.StatusFound, scheme+"://"+rh.Value+"/_torii/api/v1/sso_handoff?token="+tok)
+				return c.Redirect(http.StatusFound, scheme+"://"+rh.Value+"/_torii/handoff#token="+tok)
 			}
 		}
 	}
 	return c.Redirect(http.StatusFound, "/_torii/dashboard")
 }
 
-// ssoHandoff is the cross-host counterpart to oauthCallback: it lands on a
-// service domain after SSO completed on torii, exchanges the signed handoff
+// ssoHandoff is the cross-host counterpart to oauthCallback: it runs on a
+// service domain after SSO completed on torii and exchanges the signed handoff
 // token for a fresh session on this host (cookies are per-host so the torii
-// session can't be seen here), and redirects to the originally requested
-// path. The token is bound to this host and expires in 30s.
+// session can't be seen here). The token is bound to this host, expires in
+// 30s, and is single-use.
+//
+// It takes the token in a POST body rather than the query string so it never
+// lands in a URL — from there it would leak to the upstream through the Referer
+// of the follow-up navigation, and torii deliberately does not rewrite proxied
+// response headers. The caller (client/app/pages/handoff.vue) hard-navigates
+// to "/" afterwards so the Go dispatch re-evaluates with the new cookies.
 func (h *authHandlers) ssoHandoff(c *echo.Context) error {
-	tok := c.QueryParam("token")
-	if tok == "" {
-		return c.Redirect(http.StatusFound, "/_torii/signin?error=handoff")
+	c.Response().Header().Set("Referrer-Policy", "no-referrer")
+	c.Response().Header().Set("Cache-Control", "no-store")
+
+	var req struct {
+		Token string `json:"token"`
 	}
-	claims, err := auth.ParseHandoffToken(tok, h.cfg.JWTSecret)
+	if err := c.Bind(&req); err != nil || req.Token == "" {
+		return handoffError(c)
+	}
+	claims, err := auth.ParseHandoffToken(req.Token, h.cfg.JWTSecret)
 	if err != nil {
-		return c.Redirect(http.StatusFound, "/_torii/signin?error=handoff")
+		return handoffError(c)
 	}
 	if !sameNormalizedHost(claims.TargetHost, c.Request().Host) {
-		return c.Redirect(http.StatusFound, "/_torii/signin?error=handoff")
+		return handoffError(c)
 	}
 	uid, err := uuid.Parse(claims.Subject)
 	if err != nil {
-		return c.Redirect(http.StatusFound, "/_torii/signin?error=handoff")
+		return handoffError(c)
+	}
+	if claims.ExpiresAt == nil || !auth.ConsumeHandoffJTI(claims.ID, claims.ExpiresAt.Time) {
+		return handoffError(c)
 	}
 	user, err := h.q.GetUserByID(c.Request().Context(), uid)
 	if err != nil {
-		return c.Redirect(http.StatusFound, "/_torii/signin?error=handoff")
+		return handoffError(c)
 	}
 	if _, _, _, err := h.issueSession(c.Request().Context(), c, user); err != nil {
-		return c.Redirect(http.StatusFound, "/_torii/signin?error=handoff")
+		return handoffError(c)
 	}
-	return c.Redirect(http.StatusFound, "/")
+	return c.JSON(http.StatusOK, map[string]bool{"ok": true})
+}
+
+func handoffError(c *echo.Context) error {
+	return c.JSON(http.StatusUnauthorized, map[string]string{"error": "handoff"})
 }
 
 func sameNormalizedHost(a, b string) bool {
