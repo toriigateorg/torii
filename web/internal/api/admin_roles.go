@@ -312,8 +312,28 @@ func (h *authHandlers) adminSetRolePermissions(c *echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "role not found"})
 	}
-	if role.IsSystem && role.Name == "admin" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "cannot edit permissions on the admin role"})
+	// Both system roles are off limits: admin is the full permission set, and
+	// 'all' is auto-assigned to every account, so a write here grants whatever
+	// it contains to the entire user base.
+	if role.IsSystem && (role.Name == "admin" || role.Name == "all") {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "cannot edit permissions on the " + role.Name + " role"})
+	}
+	// A caller can only put permissions into a role that they already hold
+	// themselves — otherwise roles.update alone escalates to anything.
+	claims := auth.ClaimsFrom(c)
+	if claims == nil || !callerHoldsAll(claims, req.Permissions) {
+		h.auditor.LogFromEcho(c, audit.Event{
+			EventType:  audit.EventAuthzDenied,
+			TargetType: audit.TargetRole,
+			TargetID:   &id,
+			TargetName: role.Name,
+			Metadata: map[string]any{
+				"reason": "requested permissions exceed the caller's own",
+				"path":   c.Request().URL.Path,
+				"method": c.Request().Method,
+			},
+		})
+		return c.JSON(http.StatusForbidden, map[string]string{"error": "forbidden: cannot grant permissions you do not hold"})
 	}
 
 	beforePerms, _ := h.q.ListRolePermissions(ctx, id)

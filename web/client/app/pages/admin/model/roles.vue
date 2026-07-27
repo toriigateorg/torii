@@ -132,8 +132,9 @@ async function openDetail(r: Role) {
   }
 }
 
-function isAdminLocked() {
-  return !!(detailRole.value?.is_system && detailRole.value.name === "admin")
+function isPermsLocked() {
+  const r = detailRole.value
+  return !!(r?.is_system && (r.name === "admin" || r.name === "all"))
 }
 
 function permIsSet(p: string) {
@@ -141,7 +142,7 @@ function permIsSet(p: string) {
 }
 
 async function togglePermission(p: string) {
-  if (!detailRole.value || isAdminLocked()) return
+  if (!detailRole.value || isPermsLocked()) return
   const next = permIsSet(p)
     ? detailPerms.value.filter((x) => x !== p)
     : [...detailPerms.value, p]
@@ -423,8 +424,8 @@ async function confirmDelete() {
           </TabsList>
 
           <TabsContent value="permissions" class="mt-4">
-            <p v-if="isAdminLocked()" class="text-xs text-muted-foreground mb-3">
-              The <span class="font-mono">admin</span> role has all permissions and cannot be edited.
+            <p v-if="isPermsLocked()" class="text-xs text-muted-foreground mb-3">
+              The <span class="font-mono">{{ detailRole?.name }}</span> role is a system role and its permissions cannot be edited.
             </p>
             <div v-if="detailLoading" class="text-muted-foreground font-mono text-xs py-6 text-center">loading…</div>
             <div v-else class="flex flex-col gap-3">
@@ -434,7 +435,7 @@ async function confirmDelete() {
                   <label v-for="p in perms" :key="p" class="flex items-center gap-2 text-xs font-mono">
                     <Checkbox
                       :model-value="permIsSet(p)"
-                      :disabled="isAdminLocked()"
+                      :disabled="isPermsLocked()"
                       @update:model-value="togglePermission(p)"
                     />
                     {{ p }}
