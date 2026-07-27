@@ -2,6 +2,11 @@
 //
 import tailwindcss from "@tailwindcss/vite";
 
+// The Go dispatch only routes /_torii/* to the SPA, so every URL the app emits
+// has to carry the prefix. Nuxt applies baseURL to build assets but not to
+// hand-written public-asset paths, hence the explicit joins below.
+const baseURL = "/_torii/";
+
 export default defineNuxtConfig({
   compatibilityDate: "2025-07-15",
   devtools: { enabled: true },
@@ -25,7 +30,7 @@ export default defineNuxtConfig({
   },
 
   app: {
-    baseURL: "/_torii/",
+    baseURL,
     head: {
       htmlAttrs: { lang: "en" },
       meta: [
@@ -43,9 +48,9 @@ export default defineNuxtConfig({
         { name: "twitter:image:alt", content: "torii — identity-aware reverse proxy" },
       ],
       link: [
-        { rel: "icon", type: "image/svg+xml", href: "/torii-logo.svg" },
-        { rel: "alternate icon", type: "image/x-icon", href: "/favicon.ico" },
-        { rel: "apple-touch-icon", href: "/torii-logo.svg" },
+        { rel: "icon", type: "image/svg+xml", href: `${baseURL}torii-logo.svg` },
+        { rel: "alternate icon", type: "image/x-icon", href: `${baseURL}favicon.ico` },
+        { rel: "apple-touch-icon", href: `${baseURL}torii-logo.svg` },
       ],
     },
   },

@@ -6,6 +6,8 @@ const route = useRoute()
 
 const navLinks: { to: string; label: string }[] = []
 
+const logo = publicAsset("torii-logo.svg")
+
 const isLanding = computed(() => route.path === "/")
 
 const mobileOpen = ref(false)
@@ -27,7 +29,7 @@ async function onSignout() {
       <div class="mx-auto max-w-7xl flex h-14 items-center justify-between px-4 sm:px-6 lg:px-8">
         <NuxtLink to="/" class="flex items-center gap-2 group" aria-label="torii — home">
           <img
-            src="/torii-logo.svg"
+            :src="logo"
             alt=""
             aria-hidden="true"
             width="28"

@@ -391,6 +391,15 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logg
 		}
 		host := c.Request().Host
 		if cfg.IsToriiHost(host) {
+			// Browsers fetch /favicon.ico from the host root on their own,
+			// whatever <link rel="icon"> says, and the 302 to /_torii/ answers
+			// that with HTML. Serve the real file from the SPA bundle. Only on
+			// the torii host — on a service domain /favicon.ico belongs to the
+			// upstream.
+			if path == "/favicon.ico" {
+				c.Request().URL.Path = "/_torii/favicon.ico"
+				return spa(c)
+			}
 			return c.Redirect(http.StatusFound, "/_torii/")
 		}
 		if cache != nil {

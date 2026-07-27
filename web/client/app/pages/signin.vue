@@ -12,6 +12,8 @@ const route = useRoute()
 
 interface PublicProvider { slug: string; name: string }
 
+const logo = publicAsset("torii-logo.svg")
+
 const identifier = ref("")
 const password = ref("")
 const error = ref<string | null>(null)
@@ -84,7 +86,7 @@ function ssoSignin(slug: string) {
     <Card class="hairline">
       <CardHeader>
         <div class="flex items-center gap-2 mb-1">
-          <img src="/torii-logo.svg" alt="" aria-hidden="true" width="20" height="20" class="size-5" />
+          <img :src="logo" alt="" aria-hidden="true" width="20" height="20" class="size-5" />
           <span class="text-mono-label">// signin</span>
         </div>
         <h1 class="sr-only">Sign in to torii</h1>
