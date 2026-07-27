@@ -178,7 +178,8 @@ func runInner(ctx context.Context, host string, port int) error {
 
 	var cache *proxy.ServiceCache
 	if pool != nil {
-		cache = proxy.NewServiceCache(db.New(pool), 30*time.Second)
+		blockLoopback := cfg != nil && cfg.BlockLoopbackUpstreams
+		cache = proxy.NewServiceCache(db.New(pool), 30*time.Second, blockLoopback)
 	}
 
 	var auditor *audit.Logger

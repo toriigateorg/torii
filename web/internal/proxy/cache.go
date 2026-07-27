@@ -9,11 +9,13 @@ import (
 	"net/url"
 	"os"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
 
 	"torii/internal/db"
+	"torii/internal/netutil"
 )
 
 type CachedService struct {
@@ -56,13 +58,17 @@ type ServiceCache struct {
 	loadedAt time.Time
 	ttl      time.Duration
 	q        *db.Queries
+	// blockLoopback mirrors cfg.BlockLoopbackUpstreams and is applied by the
+	// dial-time SSRF guard installed on each service transport.
+	blockLoopback bool
 }
 
-func NewServiceCache(q *db.Queries, ttl time.Duration) *ServiceCache {
+func NewServiceCache(q *db.Queries, ttl time.Duration, blockLoopback bool) *ServiceCache {
 	return &ServiceCache{
-		byDomain: map[string]*CachedService{},
-		ttl:      ttl,
-		q:        q,
+		byDomain:      map[string]*CachedService{},
+		ttl:           ttl,
+		q:             q,
+		blockLoopback: blockLoopback,
 	}
 }
 
@@ -124,10 +130,20 @@ func (c *ServiceCache) refreshLocked(ctx context.Context) {
 		// Build the transport once per refresh so connections to this upstream
 		// are pooled across requests. DialContext Timeout of 0 means no dial
 		// timeout.
+		//
+		// Control runs after DNS resolution with the concrete socket address,
+		// so the SSRF deny set is enforced against the IP actually being dialed
+		// rather than whatever the hostname resolved to when an operator saved
+		// the service. That closes the DNS-rebinding window left open by the
+		// write-time check in validateServiceReq.
+		blockLoopback := c.blockLoopback
 		tr := http.DefaultTransport.(*http.Transport).Clone()
 		tr.DialContext = (&net.Dialer{
 			Timeout:   time.Duration(r.DialTimeoutSecs) * time.Second,
 			KeepAlive: 30 * time.Second,
+			Control: func(network, address string, _ syscall.RawConn) error {
+				return netutil.IsSafeUpstreamAddr(address, blockLoopback)
+			},
 		}).DialContext
 		next[r.Domain] = &CachedService{
 			ID:                r.ID,

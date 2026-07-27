@@ -7,10 +7,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -395,6 +397,16 @@ var healthCheckClient = &http.Client{
 		TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
 		ResponseHeaderTimeout: 3 * time.Second,
 		DisableKeepAlives:     true,
+		// Socket-level backstop for the resolve-then-connect gap in the probe
+		// below: the address here is post-resolution. blockLoopback is false —
+		// the config-dependent part of the deny set stays with the pre-check,
+		// this only enforces the always-unsafe ranges.
+		DialContext: (&net.Dialer{
+			Timeout: 3 * time.Second,
+			Control: func(network, address string, _ syscall.RawConn) error {
+				return netutil.IsSafeUpstreamAddr(address, false)
+			},
+		}).DialContext,
 	},
 	CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse

@@ -53,6 +53,28 @@ func IsSafeUpstreamHost(host string, blockLoopback bool) error {
 	return nil
 }
 
+// IsSafeUpstreamAddr checks an already-resolved socket address ("ip:port", the
+// form net.Dialer's Control hook receives) against the same deny set as
+// IsSafeUpstreamHost. IsSafeUpstreamHost validates admin input at write time,
+// which a DNS rebind can outlive: the proxy re-resolves the hostname on every
+// dial, so a record that answered with a public IP during validation can later
+// answer 169.254.169.254. This runs at the socket, after resolution, so there
+// is no window between the check and the connect.
+func IsSafeUpstreamAddr(address string, blockLoopback bool) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		host = address
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return fmt.Errorf("%w: unparseable address %q", ErrUnsafeAddress, address)
+	}
+	if reason := unsafeReason(ip, blockLoopback); reason != "" {
+		return fmt.Errorf("%w: %s (%s)", ErrUnsafeAddress, ip, reason)
+	}
+	return nil
+}
+
 func unsafeReason(ip net.IP, blockLoopback bool) string {
 	switch {
 	case ip.IsUnspecified():
