@@ -9,6 +9,7 @@ import (
 	"net/http/httputil"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/labstack/echo/v5"
@@ -60,19 +61,34 @@ func ProxyTo(svc *CachedService, ident Identity, c *echo.Context) error {
 		inbound.Body = http.MaxBytesReader(c.Response(), inbound.Body, svc.MaxBodySize)
 	}
 
+	// WebSocket/upgrade requests hijack the connection for long-lived
+	// bidirectional streaming, so deadlines have to come off eventually — but
+	// "this is an upgrade" is a claim made purely in client headers. Clearing
+	// deadlines on the claim alone let any authenticated caller with access to
+	// a service opt out of every time limit by sending Connection: Upgrade and
+	// then trickling bytes, with only ReadHeaderTimeout and the byte-counting
+	// MaxBodySize left. So a claimed upgrade gets a bounded handshake window
+	// here, and the deadlines are cleared in ModifyResponse only once the
+	// upstream actually answers 101.
+	upgrade := isUpgradeRequest(inbound)
+	if upgrade {
+		release, ok := acquireUpgradeSlot(ident.UserID)
+		if !ok {
+			renderUpstreamError(c.Response(), inbound, http.StatusTooManyRequests)
+			return nil
+		}
+		defer release()
+	}
+
 	// Per-service read/write deadlines on the client<->torii connection. The
 	// server-level ReadTimeout/WriteTimeout are disabled (see cmd/serve.go) so
 	// these are the effective limits; a default is applied globally and
 	// overridden here per service.
-	//
-	// WebSocket/upgrade requests hijack the connection for long-lived
-	// bidirectional streaming, so any deadline (including the global default
-	// set upstream of dispatch) would kill them. Clear deadlines for those.
-	if isUpgradeRequest(inbound) {
-		SetDeadlines(c.Response(), 0, 0)
-	} else {
-		SetDeadlines(c.Response(), svc.ReadTimeout, svc.WriteTimeout)
+	read, write := svc.ReadTimeout, svc.WriteTimeout
+	if upgrade {
+		read, write = handshakeWindow(read), handshakeWindow(write)
 	}
+	SetDeadlines(c.Response(), read, write)
 
 	rp := httputil.NewSingleHostReverseProxy(svc.Target)
 	if svc.Transport != nil {
@@ -146,6 +162,14 @@ func ProxyTo(svc *CachedService, ident Identity, c *echo.Context) error {
 		}
 	}
 	rp.ModifyResponse = func(resp *http.Response) error {
+		if upgrade && resp.StatusCode == http.StatusSwitchingProtocols {
+			// The upstream confirmed the protocol switch, so from here the
+			// connection is a long-lived bidirectional stream that no read or
+			// write deadline can survive. ReverseProxy calls ModifyResponse
+			// before it hands the hijacked connection over.
+			SetDeadlines(c.Response(), 0, 0)
+			return nil
+		}
 		if resp.StatusCode >= 500 && !svc.PassthroughErrors {
 			return replaceWithUpstreamError(resp)
 		}
@@ -165,10 +189,59 @@ func ProxyTo(svc *CachedService, ident Identity, c *echo.Context) error {
 
 // isUpgradeRequest reports whether the request is asking to switch protocols
 // (e.g. a WebSocket handshake), which the reverse proxy serves by hijacking
-// the connection for long-lived streaming.
+// the connection for long-lived streaming. This is a client claim, not a fact:
+// only a 101 from the upstream confirms it.
 func isUpgradeRequest(r *http.Request) bool {
 	return r.Header.Get("Upgrade") != "" ||
 		strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade")
+}
+
+const (
+	// upgradeHandshakeWindow bounds how long an unconfirmed upgrade may hold a
+	// connection. A WebSocket handshake is one round trip; this only has to be
+	// generous enough for a slow upstream to answer 101.
+	upgradeHandshakeWindow = 30 * time.Second
+
+	// maxUpgradesPerUser caps concurrent hijacked connections per account, so
+	// one caller can't exhaust goroutines and file descriptors by opening
+	// streams that legitimately have no deadline. Sized for a user with many
+	// tabs open against several services at once.
+	maxUpgradesPerUser = 32
+)
+
+// handshakeWindow bounds a deadline for a claimed-but-unconfirmed upgrade. A
+// service configured with no limit (0) still gets the cap, and a service with a
+// tighter limit keeps it.
+func handshakeWindow(configured time.Duration) time.Duration {
+	if configured <= 0 || configured > upgradeHandshakeWindow {
+		return upgradeHandshakeWindow
+	}
+	return configured
+}
+
+var upgradeSlots = struct {
+	sync.Mutex
+	open map[string]int
+}{open: make(map[string]int)}
+
+// acquireUpgradeSlot reserves one of userID's concurrent-upgrade slots. The
+// returned func releases it and must be called when the request finishes.
+func acquireUpgradeSlot(userID string) (func(), bool) {
+	upgradeSlots.Lock()
+	defer upgradeSlots.Unlock()
+	if upgradeSlots.open[userID] >= maxUpgradesPerUser {
+		return nil, false
+	}
+	upgradeSlots.open[userID]++
+	return func() {
+		upgradeSlots.Lock()
+		defer upgradeSlots.Unlock()
+		if upgradeSlots.open[userID] <= 1 {
+			delete(upgradeSlots.open, userID)
+			return
+		}
+		upgradeSlots.open[userID]--
+	}, true
 }
 
 // SetDeadlines applies per-request read/write deadlines to the underlying

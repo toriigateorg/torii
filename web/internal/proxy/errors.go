@@ -141,6 +141,9 @@ func errorCopy(status int) (label, title, blurb string) {
 	case http.StatusRequestEntityTooLarge:
 		return "request too large", "Your upload exceeds the size limit",
 			"The request body is larger than the maximum size allowed for this service. Contact your administrator if you need the limit raised."
+	case http.StatusTooManyRequests:
+		return "too many streams", "Too many open connections",
+			"Your account already has the maximum number of long-lived connections open through torii. Close some tabs or wait a moment and try again."
 	default:
 		return "upstream error", "Something went wrong",
 			"The service behind this domain returned an error. Contact your administrator if this keeps happening."

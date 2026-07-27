@@ -99,7 +99,7 @@ docker-compose.prod.yml      prod (bind-mounted ./audit-logs, healthcheck, APP_E
   - **`access_token` cookie** (always a session JWT) → both paths, browsers; subject to the same-origin CSRF gate on state-changing methods.
   Both torii headers and the session cookies are stripped before proxying so they never reach an upstream. See `auth.ClaimsFromProxyRequest` and `proxy.ProxyTo`.
 - **Cross-domain login**: cookies are scoped per host, so a user must sign in once per service domain. The signin page detects non-TORII_URL hosts and does a hard `window.location.assign("/")` after success so the Go dispatch can re-evaluate and proxy.
-- **WebSockets / streaming**: handled natively by `httputil.ReverseProxy` (Connection/Upgrade headers preserved by the default director).
+- **WebSockets / streaming**: handled natively by `httputil.ReverseProxy` (Connection/Upgrade headers preserved by the default director). Deadlines are only cleared once the upstream answers `101` — a request that merely *claims* `Connection: Upgrade` gets a bounded handshake window (`upgradeHandshakeWindow`, 30s) so client headers alone can't opt out of every timeout. Concurrent hijacked connections are capped per account (`maxUpgradesPerUser`, 32); over the cap torii answers 429.
 
 ## Configuration (env)
 
