@@ -7,6 +7,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"torii/internal/audit"
+	"torii/internal/auth"
 	"torii/internal/db"
 )
 
@@ -58,6 +59,12 @@ func (h *authHandlers) adminAssignUserRole(c *echo.Context) error {
 	}
 	if role.IsSystem && role.Name == "all" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "the 'all' role is auto-assigned and cannot be managed"})
+	}
+	if ok, err := h.callerCanGrantRole(ctx, auth.ClaimsFrom(c), roleID); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	} else if !ok {
+		h.logRoleGrantDenied(c, audit.TargetUser, userID, user.Username, role)
+		return c.JSON(http.StatusForbidden, map[string]string{"error": "forbidden: cannot grant a role carrying permissions you do not hold"})
 	}
 	if err := h.q.AssignUserRole(ctx, db.AssignUserRoleParams{UserID: userID, RoleID: roleID}); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not assign role"})

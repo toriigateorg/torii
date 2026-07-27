@@ -201,16 +201,53 @@ func (h *authHandlers) callerOutranksTarget(ctx context.Context, claims *auth.Cl
 	if err != nil {
 		return false, err
 	}
+	return callerHoldsAll(claims, targetPerms), nil
+}
+
+// callerCanGrantRole reports whether the caller may hand out a role: only if
+// every permission the role carries is one the caller already holds. Assigning
+// a role the caller doesn't fully hold — the admin role above all — is
+// privilege escalation, since the grantee's next token refresh reloads roles
+// and permissions from the DB.
+func (h *authHandlers) callerCanGrantRole(ctx context.Context, claims *auth.Claims, roleID uuid.UUID) (bool, error) {
+	if claims == nil {
+		return false, nil
+	}
+	rolePerms, err := h.q.ListRolePermissions(ctx, roleID)
+	if err != nil {
+		return false, err
+	}
+	return callerHoldsAll(claims, rolePerms), nil
+}
+
+func (h *authHandlers) logRoleGrantDenied(c *echo.Context, targetType string, targetID uuid.UUID, targetName string, role db.Role) {
+	id := targetID
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:  audit.EventAuthzDenied,
+		TargetType: targetType,
+		TargetID:   &id,
+		TargetName: targetName,
+		Metadata: map[string]any{
+			"reason":    "role carries permissions the caller does not hold",
+			"role_id":   role.ID.String(),
+			"role_name": role.Name,
+			"path":      c.Request().URL.Path,
+			"method":    c.Request().Method,
+		},
+	})
+}
+
+func callerHoldsAll(claims *auth.Claims, perms []string) bool {
 	held := make(map[string]struct{}, len(claims.Permissions))
 	for _, p := range claims.Permissions {
 		held[p] = struct{}{}
 	}
-	for _, p := range targetPerms {
+	for _, p := range perms {
 		if _, ok := held[p]; !ok {
-			return false, nil
+			return false
 		}
 	}
-	return true, nil
+	return true
 }
 
 func (h *authHandlers) userIsSoleAdmin(ctx context.Context, userID uuid.UUID) (bool, error) {
