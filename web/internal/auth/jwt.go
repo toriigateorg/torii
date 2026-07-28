@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -40,7 +41,25 @@ func (c *Claims) Has(perm string) bool {
 	return false
 }
 
-func IssueAccessToken(userID uuid.UUID, username, email string, perms []string, roleIDs []uuid.UUID, secret []byte, ttl time.Duration) (string, time.Time, error) {
+// CanonicalHost normalizes a Host header so hosts compare equal regardless of
+// case, surrounding space, or an explicitly written default port. Must stay in
+// step with config.canonicalHost, which Config.IsToriiHost compares with.
+func CanonicalHost(h string) string {
+	h = strings.ToLower(strings.TrimSpace(h))
+	h = strings.TrimSuffix(h, ":443")
+	h = strings.TrimSuffix(h, ":80")
+	return h
+}
+
+// IssueAccessToken binds the token to audience — the host it was issued for.
+// Sessions are established per host (cookies are host-scoped, so signin,
+// sso_handoff and token_refresh all run on proxied service hosts too), and
+// without the binding a token minted on an upstream's origin is a portable
+// control-plane credential: script running there (a hostile upstream, an XSS,
+// a compromised dependency) can read it out of a same-origin response body and
+// replay it against /admin or against every other upstream. ParseAccessToken
+// rejects a token whose audience is not the host currently being addressed.
+func IssueAccessToken(userID uuid.UUID, username, email string, perms []string, roleIDs []uuid.UUID, audience string, secret []byte, ttl time.Duration) (string, time.Time, error) {
 	expiresAt := time.Now().Add(ttl)
 	roleStrs := make([]string, len(roleIDs))
 	for i, r := range roleIDs {
@@ -57,6 +76,7 @@ func IssueAccessToken(userID uuid.UUID, username, email string, perms []string, 
 		TokenType:   TokenTypeAccess,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID.String(),
+			Audience:  jwt.ClaimStrings{CanonicalHost(audience)},
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
@@ -66,7 +86,11 @@ func IssueAccessToken(userID uuid.UUID, username, email string, perms []string, 
 	return signed, expiresAt, err
 }
 
-func ParseAccessToken(token string, secret []byte) (*Claims, error) {
+// ParseAccessToken verifies the signature, the token type, and that the token
+// was issued for audience — the host now serving the request. A token with no
+// audience claim is rejected outright; the only ones in the wild are those
+// minted before the claim existed, and they age out within one access TTL.
+func ParseAccessToken(token string, secret []byte, audience string) (*Claims, error) {
 	claims := &Claims{}
 	_, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -80,5 +104,20 @@ func ParseAccessToken(token string, secret []byte) (*Claims, error) {
 	if claims.TokenType != TokenTypeAccess {
 		return nil, errors.New("token is not an access token")
 	}
+	if !claims.hasAudience(CanonicalHost(audience)) {
+		return nil, errors.New("token was not issued for this host")
+	}
 	return claims, nil
+}
+
+func (c *Claims) hasAudience(want string) bool {
+	if want == "" {
+		return false
+	}
+	for _, a := range c.Audience {
+		if CanonicalHost(a) == want {
+			return true
+		}
+	}
+	return false
 }

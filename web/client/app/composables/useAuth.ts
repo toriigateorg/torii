@@ -16,7 +16,11 @@ export interface AuthUser {
 }
 
 interface TokenResponse {
-  access_token: string
+  // Omitted on proxied service hosts: torii only echoes the bearer token into
+  // the body on the control plane, so script on an upstream origin can't read a
+  // session out of a same-origin response. The httpOnly cookie is always set,
+  // and it authenticates the GETs the SPA makes on those hosts.
+  access_token?: string
   expires_in: number
   user?: AuthUser
 }
@@ -35,7 +39,9 @@ export function useAuth() {
   const user = useState<AuthUser | null>("auth:user", () => null)
   const ready = useState<boolean>("auth:ready", () => false)
 
-  const isAuthed = computed(() => !!accessToken.value && !!user.value)
+  // Keyed off the user, not the token: on a proxied service host the session
+  // lives only in the httpOnly cookie and accessToken stays null.
+  const isAuthed = computed(() => !!user.value)
   const isAdmin = computed(() => !!user.value?.roles?.some((r) => r.name === "admin"))
 
   function hasPermission(perm: string): boolean {
@@ -59,7 +65,7 @@ export function useAuth() {
   }
 
   function apply(data: TokenResponse) {
-    accessToken.value = data.access_token
+    accessToken.value = data.access_token ?? null
     if (data.user) user.value = data.user
     scheduleRefresh(data.expires_in)
   }

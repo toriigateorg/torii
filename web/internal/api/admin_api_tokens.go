@@ -117,6 +117,12 @@ func (h *authHandlers) adminCreateAPIToken(c *echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "user not found"})
 	}
+	// A personal token carries the owner's live permissions on every control-plane
+	// gate (see resolveAPIToken), so minting one for another user is exactly as
+	// powerful as resetting their password — and must clear the same bar.
+	if ok, err := h.guardOutranksTarget(c, userID, user.Username, "mint a token for"); !ok {
+		return err
+	}
 
 	raw, hash, prefix, err := auth.NewAPIToken()
 	if err != nil {
@@ -171,6 +177,13 @@ func (h *authHandlers) adminDeleteAPIToken(c *echo.Context) error {
 	row, err := h.q.GetAPITokenByID(ctx, id)
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "token not found"})
+	}
+	owner, err := h.q.GetUserByID(ctx, row.UserID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
+	if ok, err := h.guardOutranksTarget(c, row.UserID, owner.Username, "revoke a token of"); !ok {
+		return err
 	}
 	if err := h.q.DeleteAPIToken(ctx, id); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not delete api token"})

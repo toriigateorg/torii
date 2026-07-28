@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v5"
 
+	"torii/internal/audit"
 	"torii/internal/db"
 )
 
@@ -53,6 +54,7 @@ func toAuditLogDTO(r db.AuditLog) auditLogDTO {
 	if len(r.Metadata) > 0 {
 		var m map[string]any
 		if err := json.Unmarshal(r.Metadata, &m); err == nil {
+			audit.RedactHeadersIn(m)
 			dto.Metadata = m
 		}
 	}

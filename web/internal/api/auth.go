@@ -80,7 +80,7 @@ func toDTO(u db.User, roles []roleSummary, perms []string) userDTO {
 }
 
 type tokenResp struct {
-	AccessToken string   `json:"access_token"`
+	AccessToken string   `json:"access_token,omitempty"`
 	ExpiresIn   int      `json:"expires_in"`
 	User        *userDTO `json:"user,omitempty"`
 }
@@ -419,7 +419,7 @@ func (h *authHandlers) issueSession(ctx context.Context, c *echo.Context, user d
 		return "", nil, nil, err
 	}
 
-	access, _, err := auth.IssueAccessToken(user.ID, user.Username, user.Email, perms, roleIDs, h.cfg.JWTSecret, h.cfg.AccessTokenTTL)
+	access, _, err := auth.IssueAccessToken(user.ID, user.Username, user.Email, perms, roleIDs, c.Request().Host, h.cfg.JWTSecret, h.cfg.AccessTokenTTL)
 	if err != nil {
 		return "", nil, nil, err
 	}
@@ -512,7 +512,7 @@ func (h *authHandlers) AttemptCookieRefresh(c *echo.Context) (*auth.Claims, erro
 	if err != nil {
 		return nil, err
 	}
-	return auth.ParseAccessToken(accessTok, h.cfg.JWTSecret)
+	return auth.ParseAccessToken(accessTok, h.cfg.JWTSecret, c.Request().Host)
 }
 
 func (h *authHandlers) issueAndRespond(c *echo.Context, user db.User) error {
@@ -520,10 +520,19 @@ func (h *authHandlers) issueAndRespond(c *echo.Context, user db.User) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	}
+	// The bearer token is only ever echoed into the body on the control plane.
+	// signin, signup and token_refresh all answer on proxied service hosts too
+	// (cookies are host-scoped, so the flow reruns per domain), and a token in a
+	// same-origin response body is readable by any script on that upstream's
+	// origin. The session cookie is already set, and the SPA on a service host
+	// authenticates its GETs with it, so the body copy buys nothing there.
 	dto := toDTO(user, roles, perms)
-	return c.JSON(http.StatusOK, tokenResp{
-		AccessToken: access,
-		ExpiresIn:   int(h.cfg.AccessTokenTTL.Seconds()),
-		User:        &dto,
-	})
+	resp := tokenResp{
+		ExpiresIn: int(h.cfg.AccessTokenTTL.Seconds()),
+		User:      &dto,
+	}
+	if h.cfg.IsToriiHost(c.Request().Host) {
+		resp.AccessToken = access
+	}
+	return c.JSON(http.StatusOK, resp)
 }

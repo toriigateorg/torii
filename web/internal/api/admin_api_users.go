@@ -149,6 +149,15 @@ func (h *authHandlers) adminCreateAPIUser(c *echo.Context) error {
 		if role.IsSystem && role.Name == "all" {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "the 'all' role is auto-assigned and cannot be managed"})
 		}
+		// The sibling assign endpoint gates on this; without it here,
+		// api_users.create alone mints a service token wearing any role and
+		// reaching every upstream that role grants.
+		if ok, err := h.callerCanGrantRole(ctx, auth.ClaimsFrom(c), rid); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+		} else if !ok {
+			h.logRoleGrantDenied(c, audit.TargetRole, rid, role.Name, role)
+			return c.JSON(http.StatusForbidden, map[string]string{"error": errCannotGrantRole})
+		}
 		roleIDs = append(roleIDs, rid)
 	}
 
@@ -216,8 +225,23 @@ func (h *authHandlers) adminRegenerateAPIUserToken(c *echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	if _, err := h.q.GetAPIUserByID(ctx, id); err != nil {
+	apiUser, err := h.q.GetAPIUserByID(ctx, id)
+	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "api user not found"})
+	}
+	// Regenerating hands back a live token carrying whatever roles the api user
+	// already holds, so it has to clear the same bar as granting them.
+	roles, err := h.q.ListAPIUserRoles(ctx, id)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
+	for _, role := range roles {
+		if ok, err := h.callerCanGrantRole(ctx, auth.ClaimsFrom(c), role.ID); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+		} else if !ok {
+			h.logRoleGrantDenied(c, audit.TargetAPIUser, id, apiUser.Name, role)
+			return c.JSON(http.StatusForbidden, map[string]string{"error": errCannotGrantRole})
+		}
 	}
 
 	raw, hash, prefix, err := auth.NewServiceAPIToken()
@@ -320,7 +344,7 @@ func (h *authHandlers) adminAssignAPIUserRole(c *echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	} else if !ok {
 		h.logRoleGrantDenied(c, audit.TargetAPIUser, apiUserID, apiUser.Name, role)
-		return c.JSON(http.StatusForbidden, map[string]string{"error": "forbidden: cannot grant a role carrying permissions you do not hold"})
+		return c.JSON(http.StatusForbidden, map[string]string{"error": errCannotGrantRole})
 	}
 	if err := h.q.AssignAPIUserRole(ctx, db.AssignAPIUserRoleParams{ApiUserID: apiUserID, RoleID: roleID}); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not assign role"})
@@ -356,7 +380,16 @@ func (h *authHandlers) adminRevokeAPIUserRole(c *echo.Context) error {
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	}
-	apiUser, _ := h.q.GetAPIUserByID(ctx, apiUserID)
+	apiUser, err := h.q.GetAPIUserByID(ctx, apiUserID)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "api user not found"})
+	}
+	if ok, err := h.callerCanGrantRole(ctx, auth.ClaimsFrom(c), roleID); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	} else if !ok {
+		h.logRoleGrantDenied(c, audit.TargetAPIUser, apiUserID, apiUser.Name, role)
+		return c.JSON(http.StatusForbidden, map[string]string{"error": errCannotRevokeRole})
+	}
 	if err := h.q.RevokeAPIUserRole(ctx, db.RevokeAPIUserRoleParams{ApiUserID: apiUserID, RoleID: roleID}); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not revoke role"})
 	}

@@ -102,7 +102,14 @@ func authenticate(c *echo.Context, secret []byte) (*Claims, error) {
 // match the header (a torii_sat_ in X-Torii-Authorization, or a torii_pat_ / JWT
 // in X-Torii-Service-Token, is rejected) so each credential has a single valid
 // channel and a misplaced one is never silently honored.
+//
+// Session JWTs are additionally pinned to the host they were issued for, so a
+// session minted on a proxied service host cannot be replayed against the
+// control plane or against a different upstream. PAT/SAT claims are synthesized
+// from the DB rather than parsed, so they carry no audience and are unaffected.
 func authenticateWith(c *echo.Context, secret []byte, pol credentialPolicy) (*Claims, error) {
+	audience := c.Request().Host
+
 	if h := strings.TrimSpace(c.Request().Header.Get(pol.header)); h != "" {
 		switch {
 		case IsServiceAPIToken(h):
@@ -119,7 +126,7 @@ func authenticateWith(c *echo.Context, secret []byte, pol credentialPolicy) (*Cl
 			if !pol.allowUserToken {
 				return nil, errMissingToken
 			}
-			return ParseAccessToken(h, secret)
+			return ParseAccessToken(h, secret, audience)
 		}
 	}
 
@@ -142,7 +149,7 @@ func authenticateWith(c *echo.Context, secret []byte, pol credentialPolicy) (*Cl
 	if err != nil || ck.Value == "" {
 		return nil, errMissingToken
 	}
-	return ParseAccessToken(ck.Value, secret)
+	return ParseAccessToken(ck.Value, secret, audience)
 }
 
 func isStateChanging(method string) bool {
