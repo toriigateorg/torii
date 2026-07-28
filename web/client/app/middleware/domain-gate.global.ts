@@ -1,9 +1,17 @@
 // Runs on every client-side navigation. When the SPA is loaded on a host
 // that isn't TORII_URL (i.e. some service domain or an unknown one), users
 // must not be able to browse arbitrary torii pages — they should only see
-// /signin or /signup. Once authenticated on this host we know the dispatch
-// already decided no service is bound here, so anything other than the auth
-// pages becomes a 404.
+// the cross-host auth pages. Once authenticated on this host we know the
+// dispatch already decided no service is bound here, so anything other than
+// those pages becomes a 404.
+
+// Pages the Go dispatch and the SSO callback legitimately land on when the
+// SPA is running on a service domain. /handoff is where the post-SSO redirect
+// arrives (unauthenticated — the token it carries is what mints the session),
+// and /forbidden is where dispatch sends an authenticated user whose roles
+// don't grant the service.
+const crossHostPages = new Set(["/signin", "/signup", "/handoff", "/forbidden"])
+
 export default defineNuxtRouteMiddleware((to) => {
   if (import.meta.server) return
 
@@ -17,7 +25,7 @@ export default defineNuxtRouteMiddleware((to) => {
   // edge cases), drop trailing slashes, then match.
   const stripped = to.path.replace(/^\/_torii/, "") || "/"
   const normalized = stripped.replace(/\/+$/, "") || "/"
-  if (normalized === "/signin" || normalized === "/signup") return
+  if (crossHostPages.has(normalized)) return
 
   const { isAuthed } = useAuth()
 
