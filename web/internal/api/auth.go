@@ -121,7 +121,11 @@ func (h *authHandlers) signup(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	req.Username = strings.TrimSpace(req.Username)
+	// Usernames are lowercased for the same reason emails are: signin folds case
+	// on both, so storing mixed case would let 'Admin' and 'admin' be different
+	// rows that answer to the same credential. Migration 0016 enforces this in
+	// the schema too — a mixed-case insert now fails the CHECK.
+	req.Username = strings.ToLower(strings.TrimSpace(req.Username))
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	req.FirstName = strings.TrimSpace(req.FirstName)
 	req.LastName = strings.TrimSpace(req.LastName)

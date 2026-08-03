@@ -39,6 +39,23 @@ func Migrate() *cli.Command {
 					return migrateDown(c.Args().First())
 				},
 			},
+			{
+				Name:      "force",
+				Usage:     "clear a dirty migration state by pinning the version to NNNN",
+				ArgsUsage: "NNNN",
+				Description: "A migration that fails leaves schema_migrations dirty, and every\n" +
+					"subsequent `migrate up` refuses until that is cleared. Some migrations\n" +
+					"fail on purpose — 0016 aborts when two accounts differ only by letter\n" +
+					"case, because only a human can say which one is legitimate. Fix the\n" +
+					"data, force the version back to the last one that actually applied,\n" +
+					"then re-run `migrate up`.\n\n" +
+					"This only rewrites the version marker; it runs no SQL. NNNN must be a\n" +
+					"version whose schema changes are genuinely present, or the next\n" +
+					"migration will run against the wrong shape.",
+				Action: func(ctx context.Context, c *cli.Command) error {
+					return migrateForce(c.Args().First())
+				},
+			},
 		},
 	}
 }
@@ -190,6 +207,28 @@ func migrateDown(targetArg string) error {
 		}
 	}
 	fmt.Println("Migrations reverted")
+	return nil
+}
+
+func migrateForce(targetArg string) error {
+	if targetArg == "" {
+		return errors.New("migrate force requires a version: torii migrate force NNNN")
+	}
+	target, _, err := parseTarget(targetArg)
+	if err != nil {
+		return err
+	}
+
+	m, err := openMigrate()
+	if err != nil {
+		return err
+	}
+	defer closeMigrate(m)
+
+	if err := m.Force(int(target)); err != nil {
+		return fmt.Errorf("forcing version %04d: %w", target, err)
+	}
+	fmt.Printf("Version pinned to %04d, dirty flag cleared\n", target)
 	return nil
 }
 

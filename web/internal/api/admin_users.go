@@ -74,7 +74,8 @@ func (h *authHandlers) adminCreateUser(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	req.Username = strings.TrimSpace(req.Username)
+	// Lowercased to match signin's case-folding; see the note in signup.
+	req.Username = strings.ToLower(strings.TrimSpace(req.Username))
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	req.FirstName = strings.TrimSpace(req.FirstName)
 	req.LastName = strings.TrimSpace(req.LastName)

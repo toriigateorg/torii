@@ -7,9 +7,14 @@ RETURNING *;
 SELECT * FROM users WHERE id = $1;
 
 -- name: GetUserByUsernameOrEmail :one
+-- The unique lower() indexes (migration 0016) mean at most one row can match,
+-- but the ORDER BY stays as belt-and-braces: without it the plan decided which
+-- of two case-folded duplicates won, and heap order is steerable by anything
+-- that rewrites a tuple (IncrementFailedLogin, for one).
 SELECT * FROM users
 WHERE lower(username) = lower($1::text)
    OR lower(email) = lower($1::text)
+ORDER BY created_at ASC, id ASC
 LIMIT 1;
 
 -- name: ListUsers :many

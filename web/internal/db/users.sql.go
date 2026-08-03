@@ -114,9 +114,14 @@ const getUserByUsernameOrEmail = `-- name: GetUserByUsernameOrEmail :one
 SELECT id, username, email, first_name, last_name, password_hash, created_at, updated_at, failed_login_count, locked_until FROM users
 WHERE lower(username) = lower($1::text)
    OR lower(email) = lower($1::text)
+ORDER BY created_at ASC, id ASC
 LIMIT 1
 `
 
+// The unique lower() indexes (migration 0016) mean at most one row can match,
+// but the ORDER BY stays as belt-and-braces: without it the plan decided which
+// of two case-folded duplicates won, and heap order is steerable by anything
+// that rewrites a tuple (IncrementFailedLogin, for one).
 func (q *Queries) GetUserByUsernameOrEmail(ctx context.Context, dollar_1 string) (User, error) {
 	row := q.db.QueryRow(ctx, getUserByUsernameOrEmail, dollar_1)
 	var i User
@@ -137,8 +142,12 @@ func (q *Queries) GetUserByUsernameOrEmail(ctx context.Context, dollar_1 string)
 
 const incrementFailedLogin = `-- name: IncrementFailedLogin :one
 UPDATE users
-SET failed_login_count = failed_login_count + 1,
+SET failed_login_count = CASE
+        WHEN locked_until IS NOT NULL AND locked_until <= now() THEN 1
+        ELSE failed_login_count + 1
+    END,
     locked_until = CASE
+        WHEN locked_until IS NOT NULL AND locked_until <= now() THEN NULL
         WHEN failed_login_count + 1 >= 10 THEN now() + interval '15 minutes'
         ELSE locked_until
     END,
@@ -152,6 +161,10 @@ type IncrementFailedLoginRow struct {
 	LockedUntil      pgtype.Timestamptz
 }
 
+// A failure arriving after a lockout has already elapsed starts a fresh window
+// rather than extending the old one. Extending meant a single wrong password
+// every 15 minutes kept an account locked forever, so any unauthenticated
+// caller could permanently deny password login to any account, admins included.
 func (q *Queries) IncrementFailedLogin(ctx context.Context, id uuid.UUID) (IncrementFailedLoginRow, error) {
 	row := q.db.QueryRow(ctx, incrementFailedLogin, id)
 	var i IncrementFailedLoginRow

@@ -318,10 +318,13 @@ type oidcUserClaims struct {
 var nonUsernameCharsRe = regexp.MustCompile(`[^a-zA-Z0-9_.-]+`)
 
 func usernameFromEmail(email string) string {
+	// Lowercased here rather than relying on the caller: usernames carry a
+	// lowercase CHECK constraint (migration 0016), so a mixed-case derivation
+	// would fail the insert and break SSO signin outright.
 	at := strings.IndexByte(email, '@')
-	local := email
+	local := strings.ToLower(email)
 	if at >= 0 {
-		local = email[:at]
+		local = local[:at]
 	}
 	local = nonUsernameCharsRe.ReplaceAllString(local, "-")
 	local = strings.Trim(local, "-_.")

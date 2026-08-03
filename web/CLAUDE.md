@@ -147,6 +147,14 @@ Add a migration:
 torii migrate up        # via docker: docker compose run --rm app torii migrate up
 ```
 
+A failed migration leaves `schema_migrations` dirty and blocks every later `up`.
+Some migrations abort on purpose (0016 refuses when two accounts differ only by
+letter case). Fix the data, then:
+```
+torii migrate force <last version that actually applied>
+torii migrate up
+```
+
 Prune audit logs:
 ```
 torii audit prune --days 90
