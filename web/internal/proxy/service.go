@@ -187,6 +187,23 @@ func ProxyTo(svc *CachedService, ident Identity, c *echo.Context) error {
 		stripClientHeaders(req.Header)
 		stripCookies(req, auth.AccessCookie, auth.RefreshCookie, auth.SessionCookie)
 
+		// ReverseProxy strips hop-by-hop headers AFTER the director runs, and
+		// that pass deletes every header named in the request's Connection
+		// token list. Left alone, a client sending
+		// "Connection: keep-alive, X-Torii-User, X-Torii-Signature" would
+		// delete torii's identity assertions and the per-service credential
+		// overlay on their way upstream — turning an authorized request into an
+		// anonymous or unsigned one. The client can only delete, not forge, but
+		// an upstream that trusts the absence of the headers is escalated to,
+		// and disabling HMAC signing unilaterally defeats the point of it. So
+		// Connection is set to exactly what torii intends and nothing else;
+		// ReverseProxy re-derives it for confirmed upgrades either way.
+		if upgrade {
+			req.Header.Set("Connection", "Upgrade")
+		} else {
+			req.Header.Del("Connection")
+		}
+
 		issuedAt := strconv.FormatInt(time.Now().Unix(), 10)
 		roles := strings.Join(ident.Roles, ",")
 		req.Header.Set("X-Torii-User", ident.UserID)
@@ -215,6 +232,7 @@ func ProxyTo(svc *CachedService, ident Identity, c *echo.Context) error {
 		}
 	}
 	rp.ModifyResponse = func(resp *http.Response) error {
+		stripUpstreamAuthCookies(resp.Header)
 		if upgrade && resp.StatusCode == http.StatusSwitchingProtocols {
 			// The upstream confirmed the protocol switch, so from here the
 			// connection is a long-lived bidirectional stream that no read or
@@ -313,6 +331,50 @@ func SetDeadlines(w http.ResponseWriter, read, write time.Duration) {
 		_ = rc.SetWriteDeadline(now.Add(write))
 	} else {
 		_ = rc.SetWriteDeadline(time.Time{})
+	}
+}
+
+// toriiReservedCookies are the cookie names torii sets itself. Nothing behind
+// the proxy has any business defining them.
+var toriiReservedCookies = map[string]struct{}{
+	auth.AccessCookie:  {},
+	auth.RefreshCookie: {},
+	auth.SessionCookie: {},
+}
+
+// stripUpstreamAuthCookies drops Set-Cookie headers that would define one of
+// torii's own session cookies. Cookie stripping is otherwise request-direction
+// only, which left a session-fixation path open: torii's cookies are host-only
+// by design, but a hostile or XSS'd upstream on a.corp.com can answer with
+// "Set-Cookie: access_token=<attacker's token>; Domain=.corp.com; Path=/" and
+// have it apply on sibling service host b.corp.com, where the victim usually
+// has no cookie of their own yet. ClearAuthCookies emits no Domain, so the
+// victim cannot log out of the tossed cookie either.
+//
+// Names are matched exactly: cookie names are case-sensitive, so a differently
+// cased spelling is a different cookie to the browser and cannot shadow ours.
+func stripUpstreamAuthCookies(h http.Header) {
+	values := h.Values("Set-Cookie")
+	if len(values) == 0 {
+		return
+	}
+	kept := make([]string, 0, len(values))
+	for _, v := range values {
+		name := v
+		if eq := strings.IndexByte(v, '='); eq >= 0 {
+			name = v[:eq]
+		}
+		if _, reserved := toriiReservedCookies[strings.TrimSpace(name)]; reserved {
+			continue
+		}
+		kept = append(kept, v)
+	}
+	if len(kept) == len(values) {
+		return
+	}
+	h.Del("Set-Cookie")
+	for _, v := range kept {
+		h.Add("Set-Cookie", v)
 	}
 }
 

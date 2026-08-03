@@ -155,12 +155,24 @@ func (h *authHandlers) signup(c *echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "password required"})
 	}
 
+	ctx := c.Request().Context()
+
+	// Bail out on a closed signup endpoint *before* the argon2 derivation, not
+	// after. Hashing first hands an anonymous caller a 64 MiB allocation per
+	// request on a route that is meant to be shut. The authoritative check is
+	// the one below, inside the transaction that serializes against first-user
+	// signup; this is only an early-out, so a stale read here costs nothing.
+	if !h.getBoolSetting(ctx, settingSignupEnabled, true) {
+		if count, err := h.q.CountUsers(ctx); err == nil && count > 0 {
+			signupFail("signup_disabled")
+			return c.JSON(http.StatusForbidden, map[string]string{"error": "new account signups are disabled"})
+		}
+	}
+
 	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	}
-
-	ctx := c.Request().Context()
 
 	tx, err := h.pool.Begin(ctx)
 	if err != nil {
@@ -356,15 +368,28 @@ func (h *authHandlers) tokenRefresh(c *echo.Context) error {
 
 func (h *authHandlers) logout(c *echo.Context) error {
 	secure := h.cfg.IsProd()
+	terminated := false
 	if cookie, err := c.Cookie(auth.RefreshCookie); err == nil && cookie.Value != "" {
 		_ = h.q.DeleteRefreshTokenByHash(c.Request().Context(), auth.HashRefreshToken(cookie.Value))
+		terminated = true
 	}
 	h.auditor.LogFromEcho(c, audit.Event{EventType: audit.EventLogout})
 	auth.ClearAuthCookies(c, secure)
 	// Tell the browser to flush its HTTP cache for this origin so the next
 	// navigation can't serve a stale upstream HTML payload that still has
 	// the user "signed in" visually.
-	c.Response().Header().Set("Clear-Site-Data", `"cache", "storage", "executionContexts"`)
+	//
+	// "cache" only. "storage" and "executionContexts" wipe localStorage,
+	// IndexedDB, Cache Storage and service-worker registrations belonging to
+	// the *upstream application*, not to torii — and this route is
+	// unauthenticated and allowlisted on every proxied host, so an attacker's
+	// page could destroy that state with a top-level auto-submitting form POST
+	// to https://<service-host>/_torii/api/v1/logout. Emitted only when a
+	// session was actually terminated and the caller is same-origin, so the
+	// cross-site navigation gets no header at all.
+	if terminated && auth.IsSameOrigin(c.Request()) {
+		c.Response().Header().Set("Clear-Site-Data", `"cache"`)
+	}
 	c.Response().Header().Set("Cache-Control", "no-store")
 	return c.NoContent(http.StatusNoContent)
 }

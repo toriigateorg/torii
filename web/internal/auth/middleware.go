@@ -141,7 +141,7 @@ func authenticateWith(c *echo.Context, secret []byte, pol credentialPolicy) (*Cl
 	// aid for the proxy dispatch on service domains, allowed here only when the
 	// request is provably same-origin.
 	if isStateChanging(c.Request().Method) && !isCookieAllowedPath(c.Request().URL.Path) {
-		if !(pol.allowCookieIfSameOrigin && isSameOrigin(c.Request())) {
+		if !(pol.allowCookieIfSameOrigin && IsSameOrigin(c.Request())) {
 			return nil, errMissingToken
 		}
 	}
@@ -190,11 +190,12 @@ func ClaimsFromProxyRequest(c *echo.Context, secret []byte) (*Claims, error) {
 	return authenticateWith(c, secret, proxyPolicy)
 }
 
-// isSameOrigin reports whether the request's Origin (or Referer, when Origin
+// IsSameOrigin reports whether the request's Origin (or Referer, when Origin
 // is absent) refers to the same host as the request itself. Used to gate
-// cookie-based auth on state-changing requests to proxied service domains.
+// cookie-based auth on state-changing requests to proxied service domains, and
+// to gate side effects that a cross-site navigation must not be able to trigger.
 // A cross-site attacker cannot forge either header from a page they control.
-func isSameOrigin(r *http.Request) bool {
+func IsSameOrigin(r *http.Request) bool {
 	host := r.Host
 	if host == "" {
 		return false

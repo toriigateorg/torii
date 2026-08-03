@@ -44,8 +44,12 @@ type adminRoleUpdateReq struct {
 	Description *string `json:"description"`
 }
 
+// Permissions is a pointer so an absent key is distinguishable from an explicit
+// empty list. Echo's BindBody returns early on ContentLength == 0 without
+// touching the target, so a plain []string left a Content-Length: 0 PUT looking
+// exactly like a deliberate "set this role's permissions to none".
 type adminRolePermissionsReq struct {
-	Permissions []string `json:"permissions"`
+	Permissions *[]string `json:"permissions"`
 }
 
 type adminRoleServiceReq struct {
@@ -302,7 +306,11 @@ func (h *authHandlers) adminSetRolePermissions(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	for _, p := range req.Permissions {
+	if req.Permissions == nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "permissions is required"})
+	}
+	perms := *req.Permissions
+	for _, p := range perms {
 		if !auth.IsValidPermission(p) {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "unknown permission: " + p})
 		}
@@ -318,27 +326,34 @@ func (h *authHandlers) adminSetRolePermissions(c *echo.Context) error {
 	if role.IsSystem && (role.Name == "admin" || role.Name == "all") {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "cannot edit permissions on the " + role.Name + " role"})
 	}
+	beforePerms, _ := h.q.ListRolePermissions(ctx, id)
+	if beforePerms == nil {
+		beforePerms = []string{}
+	}
+
 	// A caller can only put permissions into a role that they already hold
 	// themselves — otherwise roles.update alone escalates to anything.
+	//
+	// The role's *current* permissions are checked too, because this is a
+	// wholesale replace: authorizing only the incoming list made
+	// callerHoldsAll(claims, nil) vacuously true, so anyone with roles.update
+	// could empty any non-system role and silently strip every delegated
+	// administrator holding it — recoverable only by someone who still had the
+	// permissions being restored.
 	claims := auth.ClaimsFrom(c)
-	if claims == nil || !callerHoldsAll(claims, req.Permissions) {
+	if claims == nil || !callerHoldsAll(claims, perms) || !callerHoldsAll(claims, beforePerms) {
 		h.auditor.LogFromEcho(c, audit.Event{
 			EventType:  audit.EventAuthzDenied,
 			TargetType: audit.TargetRole,
 			TargetID:   &id,
 			TargetName: role.Name,
 			Metadata: map[string]any{
-				"reason": "requested permissions exceed the caller's own",
+				"reason": "requested or existing permissions exceed the caller's own",
 				"path":   c.Request().URL.Path,
 				"method": c.Request().Method,
 			},
 		})
-		return c.JSON(http.StatusForbidden, map[string]string{"error": "forbidden: cannot grant permissions you do not hold"})
-	}
-
-	beforePerms, _ := h.q.ListRolePermissions(ctx, id)
-	if beforePerms == nil {
-		beforePerms = []string{}
+		return c.JSON(http.StatusForbidden, map[string]string{"error": "forbidden: cannot grant or remove permissions you do not hold"})
 	}
 
 	tx, err := h.pool.Begin(ctx)
@@ -351,7 +366,7 @@ func (h *authHandlers) adminSetRolePermissions(c *echo.Context) error {
 	if err := qtx.DeleteRolePermissions(ctx, id); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	}
-	for _, p := range req.Permissions {
+	for _, p := range perms {
 		if err := qtx.InsertRolePermission(ctx, db.InsertRolePermissionParams{RoleID: id, Permission: p}); err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 		}
@@ -360,7 +375,7 @@ func (h *authHandlers) adminSetRolePermissions(c *echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	}
 
-	out := req.Permissions
+	out := perms
 	if out == nil {
 		out = []string{}
 	}

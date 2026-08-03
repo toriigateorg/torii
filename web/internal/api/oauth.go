@@ -6,10 +6,13 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
+	"io"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -23,6 +26,7 @@ import (
 	"torii/internal/audit"
 	"torii/internal/auth"
 	"torii/internal/db"
+	"torii/internal/netutil"
 )
 
 const (
@@ -40,6 +44,87 @@ type cachedOIDCProvider struct {
 
 var oidcProviderCache sync.Map // map[uuid.UUID]*cachedOIDCProvider
 
+const (
+	// oidcRequestTimeout bounds a single discovery / token / JWKS request.
+	oidcRequestTimeout = 15 * time.Second
+	// oidcMaxResponseBytes caps a response body from an identity provider.
+	// go-oidc does an unbounded io.ReadAll on the discovery document, which
+	// without this is a memory-amplification trigger reachable from the
+	// unauthenticated /oauth/:slug/start once a hostile provider is registered.
+	// Discovery documents and JWKS are a few KB.
+	oidcMaxResponseBytes = 1 << 20
+	// oidcMaxRedirects bounds the redirect chain an IdP can lead torii down.
+	oidcMaxRedirects = 3
+)
+
+// limitedBodyTransport caps every response body it returns. Sits above the
+// SSRF-guarded transport so both protections apply to the same requests.
+type limitedBodyTransport struct {
+	base  http.RoundTripper
+	limit int64
+}
+
+func (t limitedBodyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.base.RoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+	resp.Body = struct {
+		io.Reader
+		io.Closer
+	}{io.LimitReader(resp.Body, t.limit), resp.Body}
+	return resp, nil
+}
+
+var oidcClientOnce sync.Once
+var oidcClient *http.Client
+
+// oidcHTTPClient is the only client torii uses to talk to an identity provider.
+// http.DefaultClient is not safe here: the write-time IsSafeUpstreamHost check
+// in adminCreateSSO validates the issuer host once and is never re-applied, so
+// a registered issuer whose discovery document answers
+// "302 Location: http://169.254.169.254/…" would have torii fetch cloud
+// metadata — and discovery also supplies token_endpoint and jwks_uri, which
+// torii fetches directly. The Control hook runs after DNS resolution on every
+// dial, including each redirect hop and every later JWKS refresh, so it closes
+// both the redirect path and the DNS-rebinding window. Mirrors the guard the
+// proxy transports already carry (see proxy.ServiceCache.refreshLocked); the
+// privilege delta was that sso.create escaped it while services.create did not.
+func (h *authHandlers) oidcHTTPClient() *http.Client {
+	oidcClientOnce.Do(func() {
+		blockLoopback := h.cfg.BlockLoopbackUpstreams
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.MaxResponseHeaderBytes = 64 << 10
+		tr.DialContext = (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+			Control: func(_, address string, _ syscall.RawConn) error {
+				return netutil.IsSafeUpstreamAddr(address, blockLoopback)
+			},
+		}).DialContext
+		oidcClient = &http.Client{
+			Transport: limitedBodyTransport{base: tr, limit: oidcMaxResponseBytes},
+			Timeout:   oidcRequestTimeout,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) >= oidcMaxRedirects {
+					return errors.New("too many redirects from identity provider")
+				}
+				if req.URL.Scheme != "https" && req.URL.Scheme != "http" {
+					return errors.New("unsupported redirect scheme " + req.URL.Scheme)
+				}
+				return nil
+			},
+		}
+	})
+	return oidcClient
+}
+
+// oidcContext attaches the hardened client so go-oidc and oauth2 use it for
+// discovery, the JWKS fetch, and the code exchange.
+func (h *authHandlers) oidcContext(ctx context.Context) context.Context {
+	return oidc.ClientContext(ctx, h.oidcHTTPClient())
+}
+
 func (h *authHandlers) oidcProviderFor(ctx context.Context, p db.SsoProvider) (*oidc.Provider, error) {
 	if v, ok := oidcProviderCache.Load(p.ID); ok {
 		c := v.(*cachedOIDCProvider)
@@ -47,7 +132,7 @@ func (h *authHandlers) oidcProviderFor(ctx context.Context, p db.SsoProvider) (*
 			return c.provider, nil
 		}
 	}
-	prov, err := oidc.NewProvider(ctx, p.IssuerUrl)
+	prov, err := oidc.NewProvider(h.oidcContext(ctx), p.IssuerUrl)
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +374,10 @@ func (h *authHandlers) oauthCallback(c *echo.Context) error {
 	}
 	cfg := h.oauth2Config(c, prov, p)
 
-	tok, err := cfg.Exchange(ctx, code)
+	// Both of these reach the provider over the network — the token endpoint and
+	// the JWKS endpoint, whose URLs come from the discovery document — so both
+	// carry the hardened client rather than http.DefaultClient.
+	tok, err := cfg.Exchange(h.oidcContext(ctx), code)
 	if err != nil {
 		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_exchange")
 	}
@@ -298,7 +386,7 @@ func (h *authHandlers) oauthCallback(c *echo.Context) error {
 		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_no_id_token")
 	}
 	verifier := prov.Verifier(&oidc.Config{ClientID: p.ClientID})
-	idToken, err := verifier.Verify(ctx, rawIDToken)
+	idToken, err := verifier.Verify(h.oidcContext(ctx), rawIDToken)
 	if err != nil {
 		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_verify")
 	}

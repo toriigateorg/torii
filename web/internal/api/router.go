@@ -137,7 +137,11 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	v1.POST("/logout", h.logout)
 	v1.GET("/me", h.me, auth.RequireUser(cfg.JWTSecret))
 	v1.GET("/me/services", h.myServices, auth.RequireUser(cfg.JWTSecret))
-	v1.POST("/me/password", h.changeMyPassword, auth.RequireUser(cfg.JWTSecret))
+	// authLimiter here for the same reason as signin/signup: changeMyPassword
+	// runs argon2id to check the current password, so a wrong guess still costs
+	// a full 64 MiB derivation. Being authenticated is not much of a barrier —
+	// one ordinary account is enough to drive it.
+	v1.POST("/me/password", h.changeMyPassword, auth.RequireUser(cfg.JWTSecret), authLimiter)
 
 	secret := cfg.JWTSecret
 	onDenied := func(c *echo.Context, perm string) {

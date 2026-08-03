@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -63,14 +64,30 @@ func (rl *ipRateLimiter) janitor() {
 	}
 }
 
+// limiterKey folds an IP into the bucket it should share with its neighbours.
+// IPv4 keys on the exact address; IPv6 keys on the /64, because a single host
+// is routinely handed one and keying on the full 128 bits would give an
+// attacker 2^64 fresh buckets — a per-IP limit that never triggers.
+func limiterKey(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil || !addr.Is6() || addr.Is4In6() {
+		return ip
+	}
+	prefix, err := addr.Prefix(64)
+	if err != nil {
+		return ip
+	}
+	return prefix.String()
+}
+
 // rateLimit returns echo middleware that allows up to `burst` requests
-// immediately and refills at `rps` requests per second per RemoteIP. On
-// rejection it returns 429 Too Many Requests.
+// immediately and refills at `rps` requests per second per RemoteIP (per /64
+// for IPv6). On rejection it returns 429 Too Many Requests.
 func rateLimit(rps rate.Limit, burst int) echo.MiddlewareFunc {
 	rl := newIPRateLimiter(rps, burst)
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
-			if !rl.get(c.RealIP()).Allow() {
+			if !rl.get(limiterKey(c.RealIP())).Allow() {
 				return c.JSON(http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
 			}
 			return next(c)

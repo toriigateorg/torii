@@ -3,9 +3,9 @@ package proxy
 import (
 	"bytes"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
-	"strings"
 )
 
 // toriiOverlay is a self-contained HTML snippet injected before </body> on
@@ -176,19 +176,74 @@ const toriiOverlay = `<div id="__torii_overlay" data-torii></div>
 var toriiOverlayBytes = []byte(toriiOverlay)
 var bodyCloseTag = []byte("</body>")
 
+// maxInjectBodyBytes caps how much of an upstream response torii will buffer in
+// order to splice the overlay into it. Injection is inherently a whole-body
+// operation, and the body arrives decompressed: the director deletes the
+// client's Accept-Encoding, which is exactly the condition under which Go's
+// Transport adds its own "Accept-Encoding: gzip" and transparently decodes the
+// reply, clearing Content-Encoding. So a hostile or compromised upstream could
+// answer a few KB on the wire that expand without bound in memory. Past the
+// cap the body streams through untouched (no overlay) rather than being
+// truncated. A real HTML document that needs an overlay is orders of magnitude
+// smaller than this.
+const maxInjectBodyBytes = 8 << 20
+
+// carriesFullBody rejects the statuses whose response has no body, or only part
+// of one. Rewriting those corrupts them: a 206 would get its Content-Length
+// replaced while its Content-Range went stale, and a 204/304 would be handed a
+// Content-Length it is defined not to have. Ordinary error pages (404, 500 with
+// passthrough_errors) do carry a full document and still get the overlay.
+func carriesFullBody(status int) bool {
+	switch status {
+	case http.StatusNoContent, http.StatusResetContent,
+		http.StatusPartialContent, http.StatusNotModified:
+		return false
+	}
+	return status >= 200
+}
+
+// shouldInject reports whether resp is a complete HTML document torii can
+// safely rewrite. A HEAD reply is excluded because it carries the headers of a
+// body it does not send, so splicing would overwrite its Content-Length with
+// the length of the empty body.
+func shouldInject(resp *http.Response) bool {
+	if !carriesFullBody(resp.StatusCode) {
+		return false
+	}
+	if resp.Request != nil && resp.Request.Method == http.MethodHead {
+		return false
+	}
+	if resp.Header.Get("Content-Encoding") != "" || resp.Header.Get("Content-Range") != "" {
+		return false
+	}
+	if disp, _, err := mime.ParseMediaType(resp.Header.Get("Content-Disposition")); err == nil && disp == "attachment" {
+		return false
+	}
+	mt, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	return err == nil && mt == "text/html"
+}
+
 // injectOverlay rewrites an HTML response to splice the torii overlay in
-// just before </body>. No-op for non-HTML, encoded, or partial responses.
+// just before </body>. No-op for non-HTML, encoded, or partial responses, and
+// for bodies above maxInjectBodyBytes.
 func injectOverlay(resp *http.Response) error {
-	ct := resp.Header.Get("Content-Type")
-	if !strings.Contains(strings.ToLower(ct), "text/html") {
+	if !shouldInject(resp) {
 		return nil
 	}
-	if resp.Header.Get("Content-Encoding") != "" {
-		return nil
-	}
-	body, err := io.ReadAll(resp.Body)
+	// One byte past the cap, so a body sitting exactly on it is still spliced
+	// and anything larger is detectable without having read it all.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxInjectBodyBytes+1))
 	if err != nil {
 		return err
+	}
+	if len(body) > maxInjectBodyBytes {
+		// Hand back what was read followed by the rest of the still-open body,
+		// so the client gets a byte-exact response with no overlay.
+		resp.Body = struct {
+			io.Reader
+			io.Closer
+		}{io.MultiReader(bytes.NewReader(body), resp.Body), resp.Body}
+		return nil
 	}
 	_ = resp.Body.Close()
 

@@ -17,14 +17,36 @@ const (
 	argonThreads uint8  = 1
 	argonKeyLen  uint32 = 32
 	argonSaltLen        = 16
+
+	// maxConcurrentHashes bounds how many argon2 derivations may run at once
+	// across the whole process. Each one allocates argonMemory (64 MiB), so
+	// without a bound the memory ceiling is set by the number of sockets an
+	// attacker can open rather than by anything torii controls — a few hundred
+	// concurrent requests to any password-hashing endpoint is enough to OOM the
+	// gateway and take every proxied service down with it. Per-IP rate limits
+	// don't cover this on their own: they are per-IP and hashing is a
+	// process-wide resource. Callers over the limit block rather than fail, so
+	// legitimate bursts queue instead of erroring.
+	maxConcurrentHashes = 4
 )
+
+// hashSlots is the semaphore enforcing maxConcurrentHashes.
+var hashSlots = make(chan struct{}, maxConcurrentHashes)
+
+// deriveKey runs argon2id under the concurrency bound. Every argon2.IDKey call
+// in torii goes through here.
+func deriveKey(pw, salt []byte, t, memory uint32, threads uint8, keyLen uint32) []byte {
+	hashSlots <- struct{}{}
+	defer func() { <-hashSlots }()
+	return argon2.IDKey(pw, salt, t, memory, threads, keyLen)
+}
 
 func HashPassword(pw string) (string, error) {
 	salt := make([]byte, argonSaltLen)
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	hash := argon2.IDKey([]byte(pw), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	hash := deriveKey([]byte(pw), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
 	return fmt.Sprintf(
 		"$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
 		argon2.Version, argonMemory, argonTime, argonThreads,
@@ -55,7 +77,7 @@ func VerifyPassword(encoded, pw string) bool {
 	if err != nil {
 		return false
 	}
-	actual := argon2.IDKey([]byte(pw), salt, t, memory, threads, uint32(len(expected)))
+	actual := deriveKey([]byte(pw), salt, t, memory, threads, uint32(len(expected)))
 	return subtle.ConstantTimeCompare(actual, expected) == 1
 }
 
