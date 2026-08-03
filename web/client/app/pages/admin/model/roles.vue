@@ -41,6 +41,9 @@ const editError = ref<string | null>(null)
 const deleteTarget = ref<Role | null>(null)
 const deleting = ref(false)
 
+const exposeTarget = ref<Service | null>(null)
+const exposing = ref(false)
+
 async function load() {
   loading.value = true
   error.value = null
@@ -161,20 +164,48 @@ function serviceIsAssigned(svcId: string) {
   return detailServices.value.some((s) => s.id === svcId)
 }
 
+function roleIsEveryone() {
+  const r = detailRole.value
+  return !!(r?.is_system && r.name === "all")
+}
+
 async function toggleService(svc: Service) {
+  if (!detailRole.value) return
+  // Assigning to 'all' publishes the service to every account, so it goes
+  // through a confirmation step instead of taking effect on one click.
+  if (roleIsEveryone() && !serviceIsAssigned(svc.id)) {
+    exposeTarget.value = svc
+    return
+  }
+  await applyServiceToggle(svc, false)
+}
+
+async function applyServiceToggle(svc: Service, confirmPublicExposure: boolean) {
   if (!detailRole.value) return
   detailError.value = null
   try {
     if (serviceIsAssigned(svc.id)) {
       await api.revokeRoleService(detailRole.value.id, svc.id)
     } else {
-      await api.assignRoleService(detailRole.value.id, svc.id)
+      await api.assignRoleService(detailRole.value.id, svc.id, confirmPublicExposure)
     }
     const svcs = await api.listRoleServices(detailRole.value.id)
     detailServices.value = svcs.items
   } catch (e: unknown) {
     const err = e as { data?: { error?: string }; message?: string }
     detailError.value = err?.data?.error ?? err?.message ?? "Failed to update services"
+  }
+}
+
+async function confirmPublicExposure() {
+  const svc = exposeTarget.value
+  if (!svc) return
+  exposing.value = true
+  try {
+    await applyServiceToggle(svc, true)
+    exposeTarget.value = null
+  } finally {
+    exposing.value = false
   }
 }
 
@@ -391,6 +422,29 @@ async function confirmDelete() {
           <Button variant="ghost" @click="deleteTarget = null">Cancel</Button>
           <Button variant="destructive" :disabled="deleting" @click="confirmDelete">
             {{ deleting ? "Deleting…" : "Delete" }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog :open="!!exposeTarget" @update:open="(v) => { if (!v) exposeTarget = null }">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Expose this service to everyone?</DialogTitle>
+          <DialogDescription>
+            <span class="font-mono">all</span> is assigned to every account automatically, so
+            checking
+            <span class="font-mono">{{ exposeTarget?.title }}</span>
+            here makes
+            <span class="font-mono">{{ exposeTarget?.domain }}</span>
+            reachable by every signed-in user, including future ones. To grant access to a
+            specific group instead, add the service to a non-system role.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="ghost" @click="exposeTarget = null">Cancel</Button>
+          <Button variant="destructive" :disabled="exposing" @click="confirmPublicExposure">
+            {{ exposing ? "Exposing…" : "Expose to everyone" }}
           </Button>
         </DialogFooter>
       </DialogContent>

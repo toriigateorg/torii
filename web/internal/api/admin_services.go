@@ -79,18 +79,25 @@ type adminServiceListResp struct {
 	Items []serviceDTO `json:"items"`
 }
 
+// Every optional field is a pointer so an omitted key is distinguishable from a
+// zero value. Headers and PreserveHost were plain values, which made an absent
+// key look identical to "no overlay" and "false" — and on the PATCH path absent
+// keys resolved to global defaults rather than to the row's current values. A
+// partial PATCH therefore silently wiped the upstream credential overlay and
+// flipped passthrough_errors on, exposing upstream error pages. Only the shipped
+// SPA escaped it, by always sending the full object.
 type adminServiceReq struct {
-	Title             string            `json:"title"`
-	Description       string            `json:"description"`
-	ServiceURL        string            `json:"service_url"`
-	Domain            string            `json:"domain"`
-	Headers           map[string]string `json:"headers"`
-	PreserveHost      bool              `json:"preserve_host"`
-	PassthroughErrors *bool             `json:"passthrough_errors"`
-	MaxBodySize       *int64            `json:"max_body_size"`
-	ReadTimeoutSecs   *int32            `json:"read_timeout_secs"`
-	WriteTimeoutSecs  *int32            `json:"write_timeout_secs"`
-	DialTimeoutSecs   *int32            `json:"dial_timeout_secs"`
+	Title             string             `json:"title"`
+	Description       string             `json:"description"`
+	ServiceURL        string             `json:"service_url"`
+	Domain            string             `json:"domain"`
+	Headers           *map[string]string `json:"headers"`
+	PreserveHost      *bool              `json:"preserve_host"`
+	PassthroughErrors *bool              `json:"passthrough_errors"`
+	MaxBodySize       *int64             `json:"max_body_size"`
+	ReadTimeoutSecs   *int32             `json:"read_timeout_secs"`
+	WriteTimeoutSecs  *int32             `json:"write_timeout_secs"`
+	DialTimeoutSecs   *int32             `json:"dial_timeout_secs"`
 }
 
 // timeoutCeiling bounds each per-service timeout (seconds). 0 means "no
@@ -212,17 +219,24 @@ func (h *authHandlers) validateServiceReq(req *adminServiceReq) (headersJSON []b
 			return nil, t.name + " must be between 0 (no timeout) and 3600 seconds"
 		}
 	}
+	// nil headersJSON means "the caller did not mention headers". Create turns
+	// that into an empty overlay; update keeps whatever the row already has.
 	if req.Headers == nil {
-		req.Headers = map[string]string{}
+		return nil, ""
 	}
-	if msg := validateHeaderOverlay(req.Headers); msg != "" {
+	if msg := validateHeaderOverlay(*req.Headers); msg != "" {
 		return nil, msg
 	}
-	headersJSON, err = json.Marshal(req.Headers)
+	headersJSON, err = json.Marshal(*req.Headers)
 	if err != nil {
 		return nil, "invalid headers"
 	}
 	return headersJSON, ""
+}
+
+// preserveHost reports the requested value, defaulting to false on create.
+func (r *adminServiceReq) preserveHost() bool {
+	return r.PreserveHost != nil && *r.PreserveHost
 }
 
 func (h *authHandlers) adminListServices(c *echo.Context) error {
@@ -263,13 +277,16 @@ func (h *authHandlers) adminCreateService(c *echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
 	}
 
+	if headers == nil {
+		headers = []byte("{}")
+	}
 	svc, err := h.q.CreateService(c.Request().Context(), db.CreateServiceParams{
 		Title:             req.Title,
 		Description:       req.Description,
 		ServiceUrl:        req.ServiceURL,
 		Domain:            req.Domain,
 		Headers:           headers,
-		PreserveHost:      req.PreserveHost,
+		PreserveHost:      req.preserveHost(),
 		PassthroughErrors: req.passthroughErrors(),
 		MaxBodySize:       req.maxBodySize(),
 		ReadTimeoutSecs:   req.readTimeoutSecs(),
@@ -312,7 +329,41 @@ func (h *authHandlers) adminUpdateService(c *echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	prev, _ := h.q.GetServiceByID(ctx, id)
+	// The error was previously discarded, so a failed lookup left prev as a zero
+	// Service and every omitted field merged against zero values.
+	prev, err := h.q.GetServiceByID(ctx, id)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "service not found"})
+	}
+	// Omitted fields keep the row's existing value. UpdateService writes every
+	// column, so anything not merged here is silently reset.
+	if headers == nil {
+		headers = prev.Headers
+	}
+	preserveHost := prev.PreserveHost
+	if req.PreserveHost != nil {
+		preserveHost = *req.PreserveHost
+	}
+	passthroughErrors := prev.PassthroughErrors
+	if req.PassthroughErrors != nil {
+		passthroughErrors = *req.PassthroughErrors
+	}
+	maxBodySize := prev.MaxBodySize
+	if req.MaxBodySize != nil {
+		maxBodySize = *req.MaxBodySize
+	}
+	readTimeout := prev.ReadTimeoutSecs
+	if req.ReadTimeoutSecs != nil {
+		readTimeout = *req.ReadTimeoutSecs
+	}
+	writeTimeout := prev.WriteTimeoutSecs
+	if req.WriteTimeoutSecs != nil {
+		writeTimeout = *req.WriteTimeoutSecs
+	}
+	dialTimeout := prev.DialTimeoutSecs
+	if req.DialTimeoutSecs != nil {
+		dialTimeout = *req.DialTimeoutSecs
+	}
 	svc, err := h.q.UpdateService(ctx, db.UpdateServiceParams{
 		ID:                id,
 		Title:             req.Title,
@@ -320,12 +371,12 @@ func (h *authHandlers) adminUpdateService(c *echo.Context) error {
 		ServiceUrl:        req.ServiceURL,
 		Domain:            req.Domain,
 		Headers:           headers,
-		PreserveHost:      req.PreserveHost,
-		PassthroughErrors: req.passthroughErrors(),
-		MaxBodySize:       req.maxBodySize(),
-		ReadTimeoutSecs:   req.readTimeoutSecs(),
-		WriteTimeoutSecs:  req.writeTimeoutSecs(),
-		DialTimeoutSecs:   req.dialTimeoutSecs(),
+		PreserveHost:      preserveHost,
+		PassthroughErrors: passthroughErrors,
+		MaxBodySize:       maxBodySize,
+		ReadTimeoutSecs:   readTimeout,
+		WriteTimeoutSecs:  writeTimeout,
+		DialTimeoutSecs:   dialTimeout,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError

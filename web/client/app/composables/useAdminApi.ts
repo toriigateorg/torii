@@ -382,11 +382,14 @@ export function useAdminApi() {
     listRoleServices(id: string) {
       return $fetch<{ items: Service[] }>(`/_torii/api/v1/admin/roles/${id}/services`, opts())
     },
-    assignRoleService(roleId: string, serviceId: string) {
+    // confirmPublicExposure is required by the server when roleId is the system
+    // 'all' role, since every account carries it and the binding publishes the
+    // service to the whole user base.
+    assignRoleService(roleId: string, serviceId: string, confirmPublicExposure = false) {
       return $fetch(`/_torii/api/v1/admin/roles/${roleId}/services`, {
         ...opts(),
         method: "POST",
-        body: { service_id: serviceId },
+        body: { service_id: serviceId, confirm_public_exposure: confirmPublicExposure },
       })
     },
     revokeRoleService(roleId: string, serviceId: string) {

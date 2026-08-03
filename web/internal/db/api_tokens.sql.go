@@ -68,6 +68,15 @@ func (q *Queries) DeleteAPIToken(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const deleteAPITokensForUser = `-- name: DeleteAPITokensForUser :exec
+DELETE FROM api_tokens WHERE user_id = $1
+`
+
+func (q *Queries) DeleteAPITokensForUser(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteAPITokensForUser, userID)
+	return err
+}
+
 const getAPITokenByHash = `-- name: GetAPITokenByHash :one
 SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, created_at FROM api_tokens WHERE token_hash = $1
 `

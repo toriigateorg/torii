@@ -9,6 +9,16 @@ SELECT * FROM refresh_tokens WHERE token_hash = $1;
 -- name: DeleteRefreshTokenByHash :exec
 DELETE FROM refresh_tokens WHERE token_hash = $1;
 
+-- name: ConsumeRefreshTokenByHash :one
+-- Atomic select-and-delete for rotation. A read followed by a separate delete
+-- let two concurrent presentations of the same token both pass the read and both
+-- be issued a fresh session, so one stolen refresh token could be forked into
+-- two independent chains. As a single statement, exactly one caller can win;
+-- pgx.ErrNoRows means the token was invalid or already rotated.
+DELETE FROM refresh_tokens
+WHERE token_hash = $1
+RETURNING *;
+
 -- name: DeleteRefreshTokensForUser :exec
 DELETE FROM refresh_tokens WHERE user_id = $1;
 

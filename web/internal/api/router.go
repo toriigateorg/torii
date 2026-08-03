@@ -99,10 +99,18 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 				dbOK = true
 			}
 		}
+		// Audit state is reported so a disabled file sink is observable here
+		// rather than being discovered by someone looking for a trail that was
+		// never written. It is deliberately excluded from "all": the database
+		// sink still records everything, so a bad log directory should not take
+		// the deployment out of rotation.
+		auditFileOK := auditor != nil && auditor.FileOK()
 		return c.JSON(http.StatusOK, map[string]bool{
-			"all": dbOK,
-			"db":  dbOK,
-			"api": true,
+			"all":        dbOK,
+			"db":         dbOK,
+			"api":        true,
+			"audit_db":   auditor != nil && dbOK,
+			"audit_file": auditFileOK,
 		})
 	})
 
@@ -134,7 +142,13 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	v1.POST("/signin", h.signin, authLimiter)
 	v1.POST("/token_refresh", h.tokenRefresh, refreshLimiter)
 	v1.GET("/refresh_and_redirect", h.refreshAndRedirect, refreshLimiter)
-	v1.POST("/logout", h.logout)
+	// logoutLimiter: /logout is unauthenticated, allowlisted on every proxied
+	// host, and writes an audit event to two sinks per call, which made it the
+	// cheapest unauthenticated write amplifier in the API. It gets its own
+	// bucket rather than sharing authLimiter, so a burst of logouts from one NAT
+	// egress can't consume that IP's signin budget.
+	logoutLimiter := rateLimit(rate.Every(time.Second), 10)
+	v1.POST("/logout", h.logout, logoutLimiter)
 	v1.GET("/me", h.me, auth.RequireUser(cfg.JWTSecret))
 	v1.GET("/me/services", h.myServices, auth.RequireUser(cfg.JWTSecret))
 	// authLimiter here for the same reason as signin/signup: changeMyPassword

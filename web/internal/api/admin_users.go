@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v5"
@@ -110,6 +111,14 @@ func (h *authHandlers) adminCreateUser(c *echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
+
+	// See signup: the human and machine identity namespaces must not overlap,
+	// since both are asserted upstream through X-Torii-Username.
+	if _, err := h.q.GetAPIUserByName(ctx, req.Username); err == nil {
+		return c.JSON(http.StatusConflict, map[string]string{"error": "username collides with an existing service api user"})
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
 
 	tx, err := h.pool.Begin(ctx)
 	if err != nil {

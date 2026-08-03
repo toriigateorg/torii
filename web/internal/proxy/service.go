@@ -28,6 +28,12 @@ type Identity struct {
 	Username string
 	Email    string
 	Roles    []string
+	// PrincipalType is auth.PrincipalUser or auth.PrincipalService. Username is
+	// users.username for the former and api_users.name for the latter, and those
+	// are separate tables with separate uniqueness — so without this an upstream
+	// resolving X-Torii-Username cannot tell a machine credential named "alice"
+	// from the human alice.
+	PrincipalType string
 }
 
 // toriiOwnedHeaders are the headers torii asserts itself, in normalized form
@@ -40,12 +46,13 @@ type Identity struct {
 // through untouched, but an upstream behind nginx with underscores_in_headers,
 // or any CGI/PHP app folding "_" to "-", would read it as the roles assertion.
 var toriiOwnedHeaders = map[string]struct{}{
-	"x-torii-user":          {},
-	"x-torii-username":      {},
-	"x-torii-email":         {},
-	"x-torii-roles":         {},
-	"x-torii-issued-at":     {},
-	"x-torii-signature":     {},
+	"x-torii-user":           {},
+	"x-torii-username":       {},
+	"x-torii-email":          {},
+	"x-torii-roles":          {},
+	"x-torii-issued-at":      {},
+	"x-torii-signature":      {},
+	"x-torii-principal-type": {},
 	"x-torii-authorization": {}, // auth.AuthorizationHeader
 	"x-torii-service-token": {}, // auth.ServiceTokenHeader
 }
@@ -206,6 +213,10 @@ func ProxyTo(svc *CachedService, ident Identity, c *echo.Context) error {
 
 		issuedAt := strconv.FormatInt(time.Now().Unix(), 10)
 		roles := strings.Join(ident.Roles, ",")
+		principal := ident.PrincipalType
+		if principal == "" {
+			principal = auth.PrincipalUser
+		}
 		req.Header.Set("X-Torii-User", ident.UserID)
 		req.Header.Set("X-Torii-Username", ident.Username)
 		if ident.Email != "" {
@@ -213,17 +224,11 @@ func ProxyTo(svc *CachedService, ident Identity, c *echo.Context) error {
 		}
 		req.Header.Set("X-Torii-Roles", roles)
 		req.Header.Set("X-Torii-Issued-At", issuedAt)
+		req.Header.Set("X-Torii-Principal-Type", principal)
 
 		if len(svc.SigningSecret) > 0 {
-			payload := strings.Join([]string{
-				ident.UserID,
-				ident.Username,
-				ident.Email,
-				roles,
-				issuedAt,
-			}, "|")
 			mac := hmac.New(sha256.New, svc.SigningSecret)
-			mac.Write([]byte(payload))
+			mac.Write([]byte(signaturePayload(ident.UserID, ident.Username, ident.Email, roles, issuedAt, principal)))
 			req.Header.Set("X-Torii-Signature", hex.EncodeToString(mac.Sum(nil)))
 		}
 
@@ -256,6 +261,30 @@ func ProxyTo(svc *CachedService, ident Identity, c *echo.Context) error {
 	}
 	rp.ServeHTTP(c.Response(), c.Request())
 	return nil
+}
+
+// signaturePayload builds the string covered by X-Torii-Signature.
+//
+// Each field is length-prefixed rather than joined with a delimiter. Joining on
+// "|" was not an injective encoding: nothing escaped or bounded the fields, and
+// emailRe permitted "|" inside the email, so distinct identities could in
+// principle serialize to the same payload and share a signature. The leading
+// fixed-width UUID happened to make a cross-user collision unconstructible, but
+// that is an accident of the field order rather than a property of the format —
+// and the format is what an upstream has to reimplement to verify.
+//
+// UPSTREAM CONTRACT: payload = concat("<len(field)>:<field>") over
+// user_id, username, email, roles, issued_at, principal_type — in that order,
+// with byte lengths, and every field present even when empty. Changing the field
+// set or order invalidates every upstream verifier.
+func signaturePayload(userID, username, email, roles, issuedAt, principalType string) string {
+	var b strings.Builder
+	for _, f := range []string{userID, username, email, roles, issuedAt, principalType} {
+		b.WriteString(strconv.Itoa(len(f)))
+		b.WriteByte(':')
+		b.WriteString(f)
+	}
+	return b.String()
 }
 
 // isUpgradeRequest reports whether the request is asking to switch protocols

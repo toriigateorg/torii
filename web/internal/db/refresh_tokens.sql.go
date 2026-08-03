@@ -12,6 +12,31 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const consumeRefreshTokenByHash = `-- name: ConsumeRefreshTokenByHash :one
+DELETE FROM refresh_tokens
+WHERE token_hash = $1
+RETURNING id, user_id, token_hash, expires_at, created_at, revoked_at
+`
+
+// Atomic select-and-delete for rotation. A read followed by a separate delete
+// let two concurrent presentations of the same token both pass the read and both
+// be issued a fresh session, so one stolen refresh token could be forked into
+// two independent chains. As a single statement, exactly one caller can win;
+// pgx.ErrNoRows means the token was invalid or already rotated.
+func (q *Queries) ConsumeRefreshTokenByHash(ctx context.Context, tokenHash []byte) (RefreshToken, error) {
+	row := q.db.QueryRow(ctx, consumeRefreshTokenByHash, tokenHash)
+	var i RefreshToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.TokenHash,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
 const countActiveRefreshTokens = `-- name: CountActiveRefreshTokens :one
 SELECT count(*) FROM refresh_tokens
 WHERE revoked_at IS NULL AND expires_at > now()

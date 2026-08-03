@@ -124,6 +124,12 @@ func (h *authHandlers) adminCreateAPIUser(c *echo.Context) error {
 	if n := len(req.Name); n < 1 || n > 200 {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "name must be 1-200 chars"})
 	}
+	// This name is forwarded to every upstream as X-Torii-Username, so it has to
+	// be a printable single-line string — control characters would let it forge
+	// header structure or corrupt logs on the far side.
+	if !isPrintableSingleLine(req.Name) {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "name must not contain control characters"})
+	}
 	if len(req.Description) > 2000 {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "description must be at most 2000 chars"})
 	}
@@ -133,6 +139,18 @@ func (h *authHandlers) adminCreateAPIUser(c *echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
+
+	// Refuse a machine name that shadows a human username. Both are asserted to
+	// upstreams through the same X-Torii-Username header, and the accompanying
+	// X-Torii-User UUID comes from a different table for each, so an upstream
+	// keying on the username string cannot tell them apart. X-Torii-Principal-Type
+	// now distinguishes them for upstreams that read it; this stops the collision
+	// arising in the first place for those that don't.
+	if _, err := h.q.GetUserByUsernameOrEmail(ctx, req.Name); err == nil {
+		return c.JSON(http.StatusConflict, map[string]string{"error": "name collides with an existing user's username or email"})
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
 
 	// Resolve and validate the requested roles up front so a bad role id fails
 	// before we mint a token.
@@ -219,15 +237,22 @@ func (h *authHandlers) adminRegenerateAPIUserToken(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	expiresAt, err := parseExpiresAt(req.ExpiresAt)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
-	}
 
 	ctx := c.Request().Context()
 	apiUser, err := h.q.GetAPIUserByID(ctx, id)
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "api user not found"})
+	}
+	// An omitted expires_at carries the existing expiry forward. Parsing it
+	// unconditionally resolved "absent" to NULL, so routine key rotation — which
+	// the shipped UI performs with no body at all — silently turned a bounded
+	// machine credential into a permanent one.
+	expiresAt := apiUser.ExpiresAt
+	if req.ExpiresAt != nil {
+		expiresAt, err = parseExpiresAt(req.ExpiresAt)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		}
 	}
 	// Regenerating hands back a live token carrying whatever roles the api user
 	// already holds, so it has to clear the same bar as granting them.
@@ -440,9 +465,10 @@ func (h *authHandlers) resolveServiceToken(ctx context.Context, raw string) (*au
 	scheduleTouchAPIUser(h.q, row.ID)
 
 	claims := &auth.Claims{
-		Username:    row.Name,
-		Permissions: []string{},
-		RoleIDs:     roleStrs,
+		Username:      row.Name,
+		Permissions:   []string{},
+		RoleIDs:       roleStrs,
+		PrincipalType: auth.PrincipalService,
 	}
 	claims.Subject = row.ID.String()
 	return claims, nil

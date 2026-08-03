@@ -54,6 +54,9 @@ type adminRolePermissionsReq struct {
 
 type adminRoleServiceReq struct {
 	ServiceID string `json:"service_id"`
+	// ConfirmPublicExposure must be set to bind a service to the system 'all'
+	// role, which every account carries. See adminAssignRoleService.
+	ConfirmPublicExposure bool `json:"confirm_public_exposure"`
 }
 
 var roleNameRe = regexp.MustCompile(`^[a-zA-Z0-9_.-]{1,64}$`)
@@ -142,6 +145,25 @@ func (h *authHandlers) adminCreateRole(c *echo.Context) error {
 		if !auth.IsValidPermission(p) {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "unknown permission: " + p})
 		}
+	}
+	// Same subset check the update path enforces. Without it, roles.create alone
+	// authored a role carrying permissions the creator does not hold: the creator
+	// can't assign it (callerCanGrantRole blocks that), but it sits there as a
+	// benign-sounding trap waiting for a real administrator to hand it out, and
+	// the assignment dialog shows name and description rather than permissions.
+	claims := auth.ClaimsFrom(c)
+	if claims == nil || !callerHoldsAll(claims, req.Permissions) {
+		h.auditor.LogFromEcho(c, audit.Event{
+			EventType:  audit.EventAuthzDenied,
+			TargetType: audit.TargetRole,
+			TargetName: req.Name,
+			Metadata: map[string]any{
+				"reason": "requested permissions exceed the caller's own",
+				"path":   c.Request().URL.Path,
+				"method": c.Request().Method,
+			},
+		})
+		return c.JSON(http.StatusForbidden, map[string]string{"error": "forbidden: cannot grant permissions you do not hold"})
 	}
 
 	ctx := c.Request().Context()
@@ -428,6 +450,16 @@ func (h *authHandlers) adminAssignRoleService(c *echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "service not found"})
 	}
+	// 'all' is auto-assigned to every account, so binding a service to it
+	// publishes that upstream to the entire user base. That is a categorically
+	// different act from granting one team access, and role_services.create is a
+	// delegated permission — so require it to be stated deliberately rather than
+	// being one indistinguishable checkbox among the others.
+	if role.IsSystem && role.Name == "all" && !req.ConfirmPublicExposure {
+		return c.JSON(http.StatusConflict, map[string]string{
+			"error": "binding a service to the 'all' role exposes it to every account; set confirm_public_exposure to proceed",
+		})
+	}
 	if err := h.q.AssignRoleService(ctx, db.AssignRoleServiceParams{RoleID: roleID, ServiceID: svcID}); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not assign service"})
 	}
@@ -441,8 +473,9 @@ func (h *authHandlers) adminAssignRoleService(c *echo.Context) error {
 		TargetID:   &rid,
 		TargetName: role.Name,
 		Metadata: map[string]any{
-			"service_id":    svc.ID.String(),
-			"service_title": svc.Title,
+			"service_id":      svc.ID.String(),
+			"service_title":   svc.Title,
+			"public_exposure": role.IsSystem && role.Name == "all",
 		},
 	})
 	return c.NoContent(http.StatusCreated)

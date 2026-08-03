@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -100,8 +101,26 @@ type signinReq struct {
 
 var (
 	usernameRe = regexp.MustCompile(`^[a-zA-Z0-9_.-]{3,64}$`)
-	emailRe    = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
+	// Printable ASCII only, excluding '@' outside the single separator. The
+	// previous `[^\s@]+` classes admitted every non-space byte — control
+	// characters, newlines, and the '|' that the HMAC payload used to join on.
+	// The email is forwarded upstream as X-Torii-Email and covered by the
+	// signature, so a control character in it produced an unsettable header and
+	// bricked the account with 502s on every proxied request.
+	emailRe = regexp.MustCompile(`^[!-?A-~]+@[!-?A-~]+\.[!-?A-~]+$`)
 )
+
+// isPrintableSingleLine reports whether s contains only printable characters —
+// no control bytes, no newlines. Applied to any operator-supplied string torii
+// forwards to an upstream in a header.
+func isPrintableSingleLine(s string) bool {
+	for _, r := range s {
+		if !unicode.IsPrint(r) {
+			return false
+		}
+	}
+	return true
+}
 
 // hashIdentifier returns a stable hex digest of an email/username for use in
 // failed-signin/signup audit events. Logging the raw value would leak PII to
@@ -160,6 +179,16 @@ func (h *authHandlers) signup(c *echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
+
+	// Both directions of the machine/human namespace have to be closed, or the
+	// api_users check is just a race: create the service credential first, then
+	// register the human account that shadows it.
+	if _, err := h.q.GetAPIUserByName(ctx, req.Username); err == nil {
+		signupFail("conflict_api_user")
+		return c.JSON(http.StatusConflict, map[string]string{"error": "username already taken"})
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
 
 	// Bail out on a closed signup endpoint *before* the argon2 derivation, not
 	// after. Hashing first hands an anonymous caller a 64 MiB allocation per
@@ -296,11 +325,23 @@ func (h *authHandlers) signin(c *echo.Context) error {
 	}
 	uid := user.ID
 	ctx := c.Request().Context()
+	// Every failure exit below pays the same argon2 cost as a real
+	// wrong-password verify. The unknown-user path above already did; these two
+	// short-circuited before reaching VerifyPassword, which handed back a
+	// distinguishable fast response and so reintroduced exactly the oracle the
+	// dummy hash exists to close. The SSO-only case is the more useful leak: it
+	// answers "does this address authenticate by password" pre-authentication.
 	if user.LockedUntil.Valid && time.Now().Before(user.LockedUntil.Time) {
+		auth.VerifyDummyPassword(req.Password)
 		signinFail("account_locked", &uid, user.Username)
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 	}
-	if !user.PasswordHash.Valid || !auth.VerifyPassword(user.PasswordHash.String, req.Password) {
+	if !user.PasswordHash.Valid {
+		auth.VerifyDummyPassword(req.Password)
+		signinFail("no_password", &uid, user.Username)
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
+	}
+	if !auth.VerifyPassword(user.PasswordHash.String, req.Password) {
 		row, _ := h.q.IncrementFailedLogin(ctx, uid)
 		reason := "bad_password"
 		if row.LockedUntil.Valid && time.Now().Before(row.LockedUntil.Time) {
@@ -342,14 +383,18 @@ func (h *authHandlers) tokenRefresh(c *echo.Context) error {
 	}
 	hash := auth.HashRefreshToken(cookie.Value)
 
-	row, err := h.q.GetRefreshTokenByHash(ctx, hash)
+	// Consume the presented token in one statement. The old shape read the row,
+	// validated it, issued a new session, and only then deleted the old row —
+	// four separate statements with no transaction, so two simultaneous
+	// presentations of the same token both passed the read and both got a
+	// session, forking one stolen token into two independent chains.
+	row, err := h.q.ConsumeRefreshTokenByHash(ctx, hash)
 	if err != nil {
 		auth.ClearAuthCookies(c, secure)
 		refreshFail("invalid_token", nil)
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid refresh token"})
 	}
 	if !row.ExpiresAt.Valid || time.Now().After(row.ExpiresAt.Time) || row.RevokedAt.Valid {
-		_ = h.q.DeleteRefreshTokenByHash(ctx, hash)
 		auth.ClearAuthCookies(c, secure)
 		uid := row.UserID
 		refreshFail("expired_or_revoked", &uid)
@@ -363,10 +408,17 @@ func (h *authHandlers) tokenRefresh(c *echo.Context) error {
 		refreshFail("user_not_found", &uid)
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "user not found"})
 	}
-
-	if err := h.q.DeleteRefreshTokenByHash(ctx, hash); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	// A lockout has to bite here too. Refresh mints a fresh access token with
+	// re-read roles and permissions, so honouring the lock only on the password
+	// path meant an attacker holding a live refresh token rode straight through
+	// the lockout that was supposed to have shut them out.
+	if user.LockedUntil.Valid && time.Now().Before(user.LockedUntil.Time) {
+		auth.ClearAuthCookies(c, secure)
+		uid := user.ID
+		refreshFail("account_locked", &uid)
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "account locked"})
 	}
+
 	return h.issueAndRespond(c, user)
 }
 

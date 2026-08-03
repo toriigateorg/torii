@@ -41,13 +41,23 @@ func configureIPExtractor(e *echo.Echo, nets []*net.IPNet) {
 						return ip.String()
 					}
 				}
-				// Entire chain is trusted: take the leftmost.
-				if first := strings.TrimSpace(parts[0]); first != "" {
-					return first
+				// Entire chain is trusted: take the leftmost. Parsed, not
+				// returned raw — see below.
+				if ip := net.ParseIP(strings.TrimSpace(parts[0])); ip != nil {
+					return ip.String()
 				}
 			}
+			// Parse before returning. These two paths used to hand back the
+			// header string verbatim, so any value at all became the rate-limit
+			// key and the recorded client address: a fresh string per request
+			// meant a fresh token bucket per request, which removes the only
+			// rate limits torii has and re-opens unbounded argon2 work. Parsing
+			// also normalises, so "::ffff:1.2.3.4" and "1.2.3.4" cannot hold two
+			// separate buckets.
 			if real := strings.TrimSpace(r.Header.Get("X-Real-Ip")); real != "" {
-				return real
+				if ip := net.ParseIP(real); ip != nil {
+					return ip.String()
+				}
 			}
 		}
 		if directIP != nil {

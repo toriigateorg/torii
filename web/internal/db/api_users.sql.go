@@ -130,6 +130,34 @@ func (q *Queries) GetAPIUserByID(ctx context.Context, id uuid.UUID) (ApiUser, er
 	return i, err
 }
 
+const getAPIUserByName = `-- name: GetAPIUserByName :one
+SELECT id, name, description, token_hash, token_prefix, expires_at, last_used_at, disabled, created_at, updated_at FROM api_users
+WHERE lower(name) = lower($1::text)
+ORDER BY created_at ASC, id ASC
+LIMIT 1
+`
+
+// Case-folded to match how usernames are resolved, so the collision check that
+// keeps api_users.name out of the human username namespace cannot be sidestepped
+// with different capitalisation.
+func (q *Queries) GetAPIUserByName(ctx context.Context, dollar_1 string) (ApiUser, error) {
+	row := q.db.QueryRow(ctx, getAPIUserByName, dollar_1)
+	var i ApiUser
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.TokenHash,
+		&i.TokenPrefix,
+		&i.ExpiresAt,
+		&i.LastUsedAt,
+		&i.Disabled,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getAPIUserRoleIDs = `-- name: GetAPIUserRoleIDs :many
 SELECT role_id FROM api_user_roles WHERE api_user_id = $1
 `

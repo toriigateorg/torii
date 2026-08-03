@@ -121,9 +121,17 @@ func (h *authHandlers) adminResetUserPassword(c *echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-// adminRevokeUserSessions deletes all refresh tokens for a user. Forces them
-// to re-authenticate everywhere (and within the access-token TTL — 60s by
+// adminRevokeUserSessions deletes every credential the account can authenticate
+// with: refresh tokens and personal access tokens. Forces them to
+// re-authenticate everywhere (and within the access-token TTL — 60s by
 // default — they lose proxy access too).
+//
+// PATs are included because this is the endpoint an operator reaches for during
+// an incident. Deleting only refresh tokens left a PAT minted during the
+// compromise alive and unbounded, so the documented containment action did not
+// contain: the attacker keeps full control-plane access through a credential
+// that survives this call, a password reset, and even deletion of their own
+// account.
 func (h *authHandlers) adminRevokeUserSessions(c *echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -137,11 +145,15 @@ func (h *authHandlers) adminRevokeUserSessions(c *echo.Context) error {
 	if err := h.q.DeleteRefreshTokensForUser(ctx, id); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	}
+	if err := h.q.DeleteAPITokensForUser(ctx, id); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
 	h.auditor.LogFromEcho(c, audit.Event{
 		EventType:  audit.EventSessionsRevoked,
 		TargetType: audit.TargetUser,
 		TargetID:   &id,
 		TargetName: user.Username,
+		Metadata:   map[string]any{"revoked": []string{"refresh_tokens", "api_tokens"}},
 	})
 	return c.NoContent(http.StatusNoContent)
 }

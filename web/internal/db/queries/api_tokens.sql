@@ -15,6 +15,9 @@ UPDATE api_tokens SET last_used_at = now() WHERE id = $1;
 -- name: DeleteAPIToken :exec
 DELETE FROM api_tokens WHERE id = $1;
 
+-- name: DeleteAPITokensForUser :exec
+DELETE FROM api_tokens WHERE user_id = $1;
+
 -- name: ListAPITokensWithUsers :many
 SELECT
     t.id,

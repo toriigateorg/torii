@@ -9,6 +9,15 @@ SELECT * FROM api_users WHERE id = $1;
 -- name: GetAPIUserByHash :one
 SELECT * FROM api_users WHERE token_hash = $1;
 
+-- name: GetAPIUserByName :one
+-- Case-folded to match how usernames are resolved, so the collision check that
+-- keeps api_users.name out of the human username namespace cannot be sidestepped
+-- with different capitalisation.
+SELECT * FROM api_users
+WHERE lower(name) = lower($1::text)
+ORDER BY created_at ASC, id ASC
+LIMIT 1;
+
 -- name: ListAPIUsers :many
 SELECT * FROM api_users
 ORDER BY created_at DESC, id ASC

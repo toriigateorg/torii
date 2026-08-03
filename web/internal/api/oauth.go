@@ -404,6 +404,22 @@ func (h *authHandlers) oauthCallback(c *echo.Context) error {
 		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_claims")
 	}
 	email := strings.ToLower(strings.TrimSpace(claims.Email))
+	// The IdP's asserted email was previously taken on trust — emailRe is applied
+	// on the password paths but never here. It is stored, forwarded upstream as
+	// X-Torii-Email, and covered by the HMAC, so a control character in it makes
+	// every proxied request for that account fail to build a header. Treat a
+	// malformed claim as an absent one rather than half-creating an account.
+	if email != "" && !emailRe.MatchString(email) {
+		h.auditor.LogFromEcho(c, audit.Event{
+			EventType: audit.EventSigninFailed,
+			Metadata: map[string]any{
+				"identifier_hash": hashIdentifier(email),
+				"reason":          "sso_invalid_email",
+				"provider":        p.Slug,
+			},
+		})
+		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_invalid_email")
+	}
 
 	user, outcome, err := h.findOrCreateSSOUser(ctx, p, claims, email)
 	if err != nil {

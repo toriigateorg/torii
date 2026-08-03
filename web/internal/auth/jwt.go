@@ -20,6 +20,17 @@ const (
 	TokenTypeHandoff = "handoff"
 )
 
+// Principal types, forwarded to upstreams as X-Torii-Principal-Type and covered
+// by the HMAC signature. users.username and api_users.name are separate tables
+// with separate uniqueness, so the same string can name a human and a machine;
+// X-Torii-User carries a UUID from one of two namespaces and cannot distinguish
+// them either. This is what lets an upstream tell "the person alice" from "the
+// service credential called alice" without an out-of-band allowlist.
+const (
+	PrincipalUser    = "user"
+	PrincipalService = "service"
+)
+
 type Claims struct {
 	Username    string   `json:"username"`
 	Email       string   `json:"email,omitempty"`
@@ -29,7 +40,19 @@ type Claims struct {
 	// Claims synthesized for PAT/SAT callers, which never round-trip through
 	// ParseAccessToken.
 	TokenType string `json:"typ,omitempty"`
+	// PrincipalType is PrincipalUser or PrincipalService. Empty means
+	// PrincipalUser — tokens minted before the claim existed are human sessions.
+	PrincipalType string `json:"ptyp,omitempty"`
 	jwt.RegisteredClaims
+}
+
+// Principal resolves PrincipalType, defaulting to PrincipalUser so a token from
+// before the claim existed is not reported as a machine identity.
+func (c *Claims) Principal() string {
+	if c.PrincipalType == PrincipalService {
+		return PrincipalService
+	}
+	return PrincipalUser
 }
 
 func (c *Claims) Has(perm string) bool {
@@ -69,11 +92,12 @@ func IssueAccessToken(userID uuid.UUID, username, email string, perms []string, 
 		perms = []string{}
 	}
 	claims := Claims{
-		Username:    username,
-		Email:       email,
-		Permissions: perms,
-		RoleIDs:     roleStrs,
-		TokenType:   TokenTypeAccess,
+		Username:      username,
+		Email:         email,
+		Permissions:   perms,
+		RoleIDs:       roleStrs,
+		TokenType:     TokenTypeAccess,
+		PrincipalType: PrincipalUser,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID.String(),
 			Audience:  jwt.ClaimStrings{CanonicalHost(audience)},

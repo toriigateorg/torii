@@ -188,10 +188,14 @@ func runInner(ctx context.Context, host string, port int) error {
 
 	var auditor *audit.Logger
 	if pool != nil && cfg != nil {
+		// audit.New reports a bad log directory by disabling only the file sink;
+		// the database sink stays live, so a non-nil error here is not a reason
+		// to run with no audit trail at all.
 		a, err := audit.New(db.New(pool), cfg.AuditLogDir)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "[audit] disabled:", err)
-		} else {
+			fmt.Fprintln(os.Stderr, "[audit] initialisation error:", err)
+		}
+		if a != nil {
 			auditor = a
 			defer auditor.Close()
 		}
@@ -408,7 +412,7 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logg
 				if err != nil {
 					if auditor != nil {
 						svcID := svc.ID
-						auditor.LogFromEcho(c, audit.Event{
+						auditor.LogProxyDenied(c, audit.Event{
 							EventType:  audit.EventProxyDenied,
 							TargetType: audit.TargetService,
 							TargetID:   &svcID,
@@ -418,7 +422,7 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logg
 								"host":   host,
 								"path":   path,
 							},
-						})
+						}, "unauthenticated")
 					}
 					if !isDocumentRequest(c.Request()) {
 						return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthenticated"})
@@ -442,7 +446,7 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logg
 						if id, perr := uuid.Parse(claims.Subject); perr == nil {
 							actorID = &id
 						}
-						auditor.LogFromEcho(c, audit.Event{
+						auditor.LogProxyDenied(c, audit.Event{
 							EventType:     audit.EventProxyDenied,
 							ActorUserID:   actorID,
 							ActorUsername: claims.Username,
@@ -454,7 +458,7 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logg
 								"host":   host,
 								"path":   path,
 							},
-						})
+						}, "no_role")
 					}
 					if isDocumentRequest(c.Request()) {
 						return c.Redirect(http.StatusFound, "/_torii/forbidden?service="+url.QueryEscape(svc.Title))
@@ -467,10 +471,11 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logg
 					}
 				}
 				return proxy.ProxyTo(svc, proxy.Identity{
-					UserID:   claims.Subject,
-					Username: claims.Username,
-					Email:    claims.Email,
-					Roles:    claims.RoleIDs,
+					UserID:        claims.Subject,
+					Username:      claims.Username,
+					Email:         claims.Email,
+					Roles:         claims.RoleIDs,
+					PrincipalType: claims.Principal(),
 				}, c)
 			}
 		}
