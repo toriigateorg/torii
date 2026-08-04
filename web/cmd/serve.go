@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -154,6 +156,9 @@ func runInner(ctx context.Context, host string, port int) error {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[config] auth disabled:", err)
 	}
+	if cfg != nil && pool != nil {
+		prepareBootstrapToken(ctx, cfg, db.New(pool))
+	}
 
 	e := echo.New()
 	if cfg != nil {
@@ -269,6 +274,50 @@ func runInner(ctx context.Context, host string, port int) error {
 	return nil
 }
 
+// prepareBootstrapToken decides whether a first-user administrator claim is
+// possible on this boot, and on what proof.
+//
+// While the users table is empty, POST /signup grants the caller the admin role
+// and every permission. signup_enabled does not gate that — the check
+// short-circuits at count zero — so the only thing that stood between a fresh
+// deployment and an anonymous administrator was whether a scanner reached the port
+// before the operator did. The documented production compose publishes it on all
+// interfaces and applies migrations at container start, so the window opens the
+// moment the container does.
+//
+// The token goes to stderr, where reading it requires host or container-log
+// access. An operator who wants to script the bootstrap can supply
+// TORII_BOOTSTRAP_TOKEN instead. Once any account exists the token is cleared, so
+// the claim cannot be replayed later.
+func prepareBootstrapToken(ctx context.Context, cfg *config.Config, q *db.Queries) {
+	countCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	count, err := q.CountUsers(countCtx)
+	if err != nil {
+		// Fail closed: leaving a token set on an unknown user count would be the
+		// one state where an unauthenticated caller could still claim admin.
+		cfg.BootstrapToken = ""
+		fmt.Fprintln(os.Stderr, "[bootstrap] could not count users, first-user signup disabled:", err)
+		return
+	}
+	if count > 0 {
+		cfg.BootstrapToken = ""
+		return
+	}
+	if cfg.BootstrapToken != "" {
+		fmt.Fprintln(os.Stderr, "[bootstrap] no users exist; first-user signup requires the TORII_BOOTSTRAP_TOKEN you supplied")
+		return
+	}
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		fmt.Fprintln(os.Stderr, "[bootstrap] could not generate a bootstrap token, first-user signup disabled:", err)
+		return
+	}
+	cfg.BootstrapToken = base64.RawURLEncoding.EncodeToString(buf)
+	fmt.Fprintln(os.Stderr, "[bootstrap] no users exist. Create the first administrator on "+cfg.ToriiURL+" using this one-time token:")
+	fmt.Fprintln(os.Stderr, "[bootstrap]   "+cfg.BootstrapToken)
+}
+
 func isProdEnv() bool {
 	env := os.Getenv("APP_ENV")
 	return env != "" && env != "dev"
@@ -375,9 +424,102 @@ func isDocumentRequest(r *http.Request) bool {
 	return strings.Contains(r.Header.Get("Accept"), "text/html")
 }
 
-// dispatch routes traffic by path: anything under /_torii/* is torii (SPA or
-// API, on any host); other paths on TORII_URL bounce to /_torii/, and on a
-// matched service host they reverse-proxy to the upstream when authenticated.
+// offHostToriiPages are the only SPA page routes served under /_torii on a
+// proxied service host. /handoff is where the cross-host return leg lands (it is
+// unauthenticated by design — the token it carries is what mints the session) and
+// /forbidden is where dispatch sends an authenticated user whose roles don't grant
+// the service.
+//
+// Everything else, /signin and /signup above all, is control plane. Serving the
+// SPA for any /_torii path on any host put torii's password form on every
+// upstream's origin, same-origin with whatever script that upstream runs.
+var offHostToriiPages = map[string]struct{}{
+	"/handoff":   {},
+	"/forbidden": {},
+}
+
+// toriiPathAllowedOffHost reports whether a /_torii path may be served on a
+// proxied service host.
+func toriiPathAllowedOffHost(path string) bool {
+	rest := strings.TrimPrefix(path, "/_torii")
+	if rest == "" {
+		return false
+	}
+	trimmed := strings.TrimSuffix(rest, "/")
+	if _, ok := offHostToriiPages[trimmed]; ok {
+		return true
+	}
+	// Bundle assets have to load for those two pages to render. /_nuxt/ is the
+	// build output namespace and never holds a page route; the /@ and
+	// /node_modules/ prefixes are the Vite dev server's module URLs, which carry no
+	// file extension.
+	for _, p := range []string{"/_nuxt/", "/@", "/node_modules/"} {
+		if strings.HasPrefix(rest, p) {
+			return true
+		}
+	}
+	// Anything else is an asset only if its last segment has a file extension.
+	// spaFS 404s a missing non-.html asset rather than falling back to the shell,
+	// so this cannot be used to reach a page route.
+	slash := strings.LastIndexByte(rest, '/')
+	last := rest[slash+1:]
+	if dot := strings.LastIndexByte(last, '.'); dot > 0 {
+		return last[dot:] != ".html"
+	}
+	return false
+}
+
+// controlPlaneRedirect builds the absolute redirect that moves a caller who has no
+// session on this proxied host over to the control plane, and mints the browser
+// correlator that lets the resulting handoff token come back to this browser only.
+//
+// The redirect used to be the relative path /_torii/signin?to=…, which kept the
+// victim on the upstream's origin and handed them torii's genuine password form
+// there.
+//
+// The target is /handoff_start, not the sign-in form: the caller very often
+// already has a control-plane session (cookies are host-scoped, so a session on
+// TORII_URL grants nothing here) and needs a handoff rather than a password
+// prompt. handoff_start falls through to /signin when there is no session, so this
+// covers both. serviceHost is empty when the host matched no service, in which
+// case there is nothing to hand off and the sign-in form is the only sensible
+// destination.
+func controlPlaneRedirect(cfg *config.Config, c *echo.Context, serviceHost, to string) string {
+	scheme := "https"
+	if !cfg.IsProd() {
+		scheme = "http"
+	}
+	base := scheme + "://" + cfg.ToriiURL
+	q := url.Values{}
+	if to != "" {
+		q.Set("to", to)
+	}
+	signinURL := func() string {
+		target := base + "/_torii/signin"
+		if len(q) > 0 {
+			target += "?" + q.Encode()
+		}
+		return target
+	}
+	if serviceHost == "" {
+		return signinURL()
+	}
+	secret, digest, err := auth.NewHandoffCorrelator()
+	if err != nil {
+		return signinURL()
+	}
+	// Set on the service host, which is the only host whose cookies the redemption
+	// endpoint will be able to read.
+	auth.SetHandoffCorrelator(c, secret, cfg.IsProd())
+	q.Set("return_to_host", serviceHost)
+	q.Set("handoff_cnf", digest)
+	return base + "/_torii/api/v1/handoff_start?" + q.Encode()
+}
+
+// dispatch routes traffic by path: /_torii/* is torii's own surface (the full SPA
+// on TORII_URL, only the cross-host pages elsewhere); other paths on TORII_URL
+// bounce to /_torii/, and on a matched service host they reverse-proxy to the
+// upstream when authenticated.
 func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logger, refresher api.SessionRefresher, spa echo.HandlerFunc) echo.HandlerFunc {
 	_ = refresher
 	return func(c *echo.Context) error {
@@ -387,13 +529,28 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logg
 		if strings.HasPrefix(path, "/_torii/api/") {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "not found"})
 		}
+		host := c.Request().Host
+		onToriiHost := cfg == nil || cfg.IsToriiHost(host)
 		if path == "/_torii" || strings.HasPrefix(path, "/_torii/") {
-			return spa(c)
+			if onToriiHost || toriiPathAllowedOffHost(path) {
+				return spa(c)
+			}
+			// A control-plane page requested on a service host. Send navigations
+			// to the real control plane; everything else is simply not here.
+			if isDocumentRequest(c.Request()) {
+				serviceHost := ""
+				if cache != nil {
+					if _, ok := cache.Lookup(c.Request().Context(), host); ok {
+						serviceHost = host
+					}
+				}
+				return c.Redirect(http.StatusFound, controlPlaneRedirect(cfg, c, serviceHost, ""))
+			}
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "not found"})
 		}
 		if cfg == nil {
 			return c.Redirect(http.StatusFound, "/_torii/")
 		}
-		host := c.Request().Host
 		if cfg.IsToriiHost(host) {
 			// Browsers fetch /favicon.ico from the host root on their own,
 			// whatever <link rel="icon"> says, and the 302 to /_torii/ answers
@@ -431,7 +588,12 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logg
 					if hasSessionMarker(c.Request()) {
 						return c.Redirect(http.StatusFound, "/_torii/api/v1/refresh_and_redirect?to="+url.QueryEscape(to))
 					}
-					return c.Redirect(http.StatusFound, "/_torii/signin?to="+url.QueryEscape(to))
+					// Absolute, to the control plane. A relative target kept the
+					// victim on this upstream's origin and delivered them torii's
+					// genuine sign-in form there, on the genuine certificate, with
+					// their password manager holding a matching entry — while any
+					// script on that origin watched the POST.
+					return c.Redirect(http.StatusFound, controlPlaneRedirect(cfg, c, host, to))
 				}
 				roleIDs := make([]uuid.UUID, 0, len(claims.RoleIDs))
 				for _, s := range claims.RoleIDs {
@@ -479,13 +641,14 @@ func dispatch(cfg *config.Config, cache *proxy.ServiceCache, auditor *audit.Logg
 				}, c)
 			}
 		}
-		// Unknown host, non-/_torii path: redirect navigations to /_torii/signin
-		// (so the user lands somewhere sensible); 404 everything else. Preserve
-		// the original path as ?to= so the SPA can bounce the user back after
-		// signin — useful when a service is being provisioned and the cache
-		// hasn't picked it up yet.
+		// Unknown host, non-/_torii path: redirect navigations to the control
+		// plane's sign-in page (so the user lands somewhere sensible); 404
+		// everything else. No return_to_host, because an unmatched host is not a
+		// registered service and no handoff to it would be honoured — the ?to=
+		// path is preserved only so the SPA can offer it once the user is signed
+		// in, which is useful while a service is still being provisioned.
 		if isDocumentRequest(c.Request()) {
-			return c.Redirect(http.StatusFound, "/_torii/signin?to="+url.QueryEscape(c.Request().URL.RequestURI()))
+			return c.Redirect(http.StatusFound, controlPlaneRedirect(cfg, c, "", c.Request().URL.RequestURI()))
 		}
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "not found"})
 	}

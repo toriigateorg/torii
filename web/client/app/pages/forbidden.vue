@@ -34,9 +34,17 @@ function goTorii() {
 
 async function switchAccount() {
   await signout()
-  // Stay on the current (service) host so a different account can sign in
-  // and have the Go dispatch re-evaluate access for it.
+  // Sign-in happens on the control plane — the form is never served on a service
+  // origin — and the session comes back here through the handoff leg. Passing
+  // return_to_host would need a correlator this page cannot mint (it must be set
+  // by a server response on this host), so the user is sent to sign in and can
+  // navigate back; the dispatch will then run the correlated flow.
   if (import.meta.client) {
+    const toriiHost = useToriiUrl()
+    if (toriiHost && window.location.host !== toriiHost) {
+      window.location.assign(`${window.location.protocol}//${toriiHost}/_torii/signin`)
+      return
+    }
     window.location.assign("/_torii/signin")
     return
   }

@@ -13,11 +13,18 @@ const { signup } = useAuth()
 
 const signupEnabled = ref(true)
 const configLoaded = ref(false)
+// True while no account exists. The first account receives the admin role and
+// every permission, so claiming it requires the one-time token the server prints
+// to stderr at startup — otherwise the first anonymous caller to reach a freshly
+// migrated deployment became its administrator.
+const bootstrapRequired = ref(false)
+const bootstrapToken = ref("")
 
 onMounted(async () => {
   try {
-    const cfg = await $fetch<{ signup_enabled: boolean }>("/_torii/api/v1/auth/config")
+    const cfg = await $fetch<{ signup_enabled: boolean; bootstrap_required: boolean }>("/_torii/api/v1/auth/config")
     signupEnabled.value = cfg.signup_enabled
+    bootstrapRequired.value = cfg.bootstrap_required
   } catch {
     /* fall back to enabled; server still gates */
   } finally {
@@ -71,6 +78,7 @@ async function onSubmit() {
       password: password.value,
       first_name: firstName.value.trim(),
       last_name: lastName.value.trim(),
+      bootstrap_token: bootstrapRequired.value ? bootstrapToken.value.trim() : undefined,
     })
     await navigateTo("/dashboard")
   } catch (err: unknown) {
@@ -111,6 +119,25 @@ async function onSubmit() {
           </NuxtLink>
         </div>
         <form v-else class="flex flex-col gap-4" novalidate aria-describedby="signup-error" @submit.prevent="onSubmit">
+          <template v-if="bootstrapRequired">
+            <Alert>
+              <AlertDescription>
+                This is the first account on this instance and will be granted full
+                administrator access. Paste the one-time bootstrap token printed in the
+                server log at startup.
+              </AlertDescription>
+            </Alert>
+            <div class="flex flex-col gap-1.5">
+              <Label for="bootstrap_token">Bootstrap token</Label>
+              <Input
+                id="bootstrap_token"
+                v-model="bootstrapToken"
+                autocomplete="off"
+                spellcheck="false"
+                class="font-mono text-xs"
+              />
+            </div>
+          </template>
           <div class="flex flex-col gap-1.5">
             <Label for="username">Username</Label>
             <Input id="username" v-model="username" autocomplete="username" autofocus />

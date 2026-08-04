@@ -21,7 +21,18 @@ type updateSettingsReq struct {
 }
 
 func (h *authHandlers) getBoolSetting(ctx context.Context, key string, def bool) bool {
-	row, err := h.q.GetSetting(ctx, key)
+	return getBoolSettingWith(ctx, h.q, key, def)
+}
+
+// getBoolSettingWith reads a setting through a caller-supplied querier.
+//
+// Callers holding an open transaction must pass their own qtx, never h.q: h.q
+// issues on the pool, so reading a setting on it while a transaction is checked
+// out is a second connection acquisition made while holding the first. signup did
+// exactly that under an advisory lock, which turned four concurrent unauthenticated
+// requests into a pool-wide deadlock.
+func getBoolSettingWith(ctx context.Context, q *db.Queries, key string, def bool) bool {
+	row, err := q.GetSetting(ctx, key)
 	if err != nil {
 		return def
 	}

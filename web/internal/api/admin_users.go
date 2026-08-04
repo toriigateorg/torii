@@ -20,6 +20,7 @@ import (
 const (
 	errCannotGrantRole  = "forbidden: cannot grant a role conferring permissions or service access you do not hold"
 	errCannotRevokeRole = "forbidden: cannot revoke a role you could not grant"
+	errCannotDeleteRole = "forbidden: cannot delete a role conferring permissions or service access you do not hold"
 )
 
 type adminUserListResp struct {
@@ -200,11 +201,20 @@ func (h *authHandlers) adminDeleteUser(c *echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-// callerOutranksTarget reports whether the caller's own permission set is a
-// superset of the target user's. Without it, a delegated operator holding a
-// single write permission (users.update) could act on an account more
-// privileged than their own — resetting an admin's password and then signing
-// in as them, since signin loads the target's live roles into the JWT.
+// callerOutranksTarget reports whether the caller's own authority is a superset
+// of the target user's. Without it, a delegated operator holding a single write
+// permission (users.update) could act on an account more privileged than their
+// own — resetting an admin's password and then signing in as them, since signin
+// loads the target's live roles into the JWT.
+//
+// A principal's authority has the same two dimensions callerCanGrantRole spans:
+// control-plane permissions and proxied-service reach. Comparing permissions
+// alone was vacuous for the population that matters. callerHoldsAll over an empty
+// slice is true, and the admin UI documents permission-less, service-only roles
+// as the way to model who can reach which app — so every ordinary user was
+// "outranked" by anyone holding users.update, who could then reset their password,
+// sign in as them, and reach every upstream that account reaches with torii's HMAC
+// vouching for the impersonated identity.
 func (h *authHandlers) callerOutranksTarget(ctx context.Context, claims *auth.Claims, targetID uuid.UUID) (bool, error) {
 	if claims == nil {
 		return false, nil
@@ -216,7 +226,52 @@ func (h *authHandlers) callerOutranksTarget(ctx context.Context, claims *auth.Cl
 	if err != nil {
 		return false, err
 	}
-	return callerHoldsAll(claims, targetPerms), nil
+	if !callerHoldsAll(claims, targetPerms) {
+		return false, nil
+	}
+	// A caller holding every permission is a full administrator and outranks
+	// everyone by definition. The exemption is load-bearing, not a convenience:
+	// the admin system role carries no role_services rows and AllowsAnyRole grants
+	// it nothing implicitly, so a bare subset check below would stop a real
+	// administrator from resetting the password of any service-bound user.
+	if callerHoldsAll(claims, auth.AllPermissions) {
+		return true, nil
+	}
+	return h.callerReachesUserServices(ctx, claims, targetID)
+}
+
+// callerReachesUserServices reports whether every upstream the target user can
+// reach is one the caller can already reach.
+//
+// Unlike callerReachesRoleServices this has no role_services.create
+// short-circuit, and must not grow one: the authority to bind a service to a role
+// is not the authority to impersonate someone who already reaches it.
+func (h *authHandlers) callerReachesUserServices(ctx context.Context, claims *auth.Claims, targetID uuid.UUID) (bool, error) {
+	targetServices, err := h.q.ListServicesForUser(ctx, targetID)
+	if err != nil {
+		return false, err
+	}
+	if len(targetServices) == 0 {
+		return true, nil
+	}
+	callerID, err := uuid.Parse(claims.Subject)
+	if err != nil {
+		return false, nil
+	}
+	reachable, err := h.q.ListServicesForUser(ctx, callerID)
+	if err != nil {
+		return false, err
+	}
+	held := make(map[uuid.UUID]struct{}, len(reachable))
+	for _, s := range reachable {
+		held[s.ID] = struct{}{}
+	}
+	for _, s := range targetServices {
+		if _, ok := held[s.ID]; !ok {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // guardOutranksTarget applies callerOutranksTarget, writing the 403 and the
@@ -239,7 +294,7 @@ func (h *authHandlers) guardOutranksTarget(c *echo.Context, targetID uuid.UUID, 
 		TargetID:   &id,
 		TargetName: targetName,
 		Metadata: map[string]any{
-			"reason": "target holds permissions the caller lacks",
+			"reason": "target holds permissions or service access the caller lacks",
 			"path":   c.Request().URL.Path,
 			"method": c.Request().Method,
 		},

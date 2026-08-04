@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"net/http"
@@ -84,6 +85,10 @@ type tokenResp struct {
 	AccessToken string   `json:"access_token,omitempty"`
 	ExpiresIn   int      `json:"expires_in"`
 	User        *userDTO `json:"user,omitempty"`
+	// HandoffURL is present when the caller signed in on the control plane after
+	// being redirected there from a proxied service host. The SPA navigates to it
+	// to materialise the session on that host. See handoffURLFor.
+	HandoffURL string `json:"handoff_url,omitempty"`
 }
 
 type signupReq struct {
@@ -92,11 +97,26 @@ type signupReq struct {
 	Password  string `json:"password"`
 	FirstName string `json:"first_name"`
 	LastName  string `json:"last_name"`
+	// BootstrapToken is required only while the users table is empty, to claim the
+	// first-user administrator grant. See config.Config.BootstrapToken.
+	BootstrapToken string `json:"bootstrap_token"`
 }
 
 type signinReq struct {
 	Identifier string `json:"identifier"`
 	Password   string `json:"password"`
+	// ReturnToHost names the proxied service host the user was sent here from, so
+	// a successful sign-in on the control plane can hand them a session back on
+	// that host. Honoured only on the torii host, only for a registered service
+	// domain, and only together with HandoffCnf. See handoffURLFor.
+	ReturnToHost string `json:"return_to_host"`
+	// ReturnTo is the path on ReturnToHost to land on afterwards. Relative only.
+	ReturnTo string `json:"return_to"`
+	// HandoffCnf is the correlator digest minted by the service host when it
+	// redirected the user here. It binds the resulting handoff token to the browser
+	// that started on that host, so a caller cannot mint one for a host it never
+	// visited.
+	HandoffCnf string `json:"handoff_cnf"`
 }
 
 var (
@@ -149,16 +169,28 @@ func (h *authHandlers) signup(c *echo.Context) error {
 	req.FirstName = strings.TrimSpace(req.FirstName)
 	req.LastName = strings.TrimSpace(req.LastName)
 
-	signupFail := func(reason string) {
+	// Failure reasons are recorded, not written, and the write happens in the
+	// deferred block below. An audit insert is a pool acquisition, and three of
+	// these calls sat inside the open transaction while the signup advisory lock
+	// was held — a second acquisition made while holding the first connection,
+	// which is a circular wait once the pool is saturated. The deferred write runs
+	// after tx.Rollback (defers are LIFO and the rollback is registered later), so
+	// the connection is always back in the pool first.
+	var failReason string
+	signupFail := func(reason string) { failReason = reason }
+	defer func() {
+		if failReason == "" {
+			return
+		}
 		h.auditor.LogFromEcho(c, audit.Event{
 			EventType: audit.EventSignupFailed,
 			Metadata: map[string]any{
 				"username_hash": hashIdentifier(req.Username),
 				"email_hash":    hashIdentifier(req.Email),
-				"reason":        reason,
+				"reason":        failReason,
 			},
 		})
-	}
+	}()
 
 	if !usernameRe.MatchString(req.Username) {
 		signupFail("invalid_username")
@@ -217,8 +249,15 @@ func (h *authHandlers) signup(c *echo.Context) error {
 	// can't both observe count == 0 and both be granted admin. The lock
 	// is released automatically at commit/rollback. The integer is
 	// arbitrary — picked once and never reused for any other purpose.
-	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", int64(74331)); err != nil {
+	//
+	// lock_timeout bounds the wait. Without it a signup that blocks on the lock
+	// pins its pooled connection for as long as the holder takes, so one stuck
+	// transaction becomes a queue the whole pool drains into.
+	if _, err := tx.Exec(ctx, "SET LOCAL lock_timeout = '5s'"); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", int64(74331)); err != nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "signup is busy, please retry"})
 	}
 
 	qtx := h.q.WithTx(tx)
@@ -227,9 +266,33 @@ func (h *authHandlers) signup(c *echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	}
-	if count > 0 && !h.getBoolSetting(ctx, settingSignupEnabled, true) {
+	// Read through qtx, not h.q. h.q issues on the pool, so this was a second
+	// connection acquisition taken while this transaction held the first *and* the
+	// advisory lock — and because the lock serialises, exactly one request reached
+	// this line while the rest blocked in Postgres still holding their own
+	// connections. The winner then waited on a connection only it could free.
+	if count > 0 && !getBoolSettingWith(ctx, qtx, settingSignupEnabled, true) {
 		signupFail("signup_disabled")
 		return c.JSON(http.StatusForbidden, map[string]string{"error": "new account signups are disabled"})
+	}
+
+	// The zero-user administrator grant needs out-of-band proof, and needs to
+	// happen on the control plane. signup_enabled does not gate it — the check
+	// above short-circuits at count zero — so before this an unauthenticated
+	// caller who reached the port during initial setup became the administrator,
+	// on any Host value including a bare IP.
+	if count == 0 {
+		if !h.cfg.IsToriiHost(c.Request().Host) {
+			signupFail("bootstrap_wrong_host")
+			return c.JSON(http.StatusForbidden, map[string]string{"error": "the first account must be created on the torii host"})
+		}
+		if h.cfg.BootstrapToken == "" ||
+			subtle.ConstantTimeCompare([]byte(h.cfg.BootstrapToken), []byte(req.BootstrapToken)) != 1 {
+			signupFail("bootstrap_token_invalid")
+			return c.JSON(http.StatusForbidden, map[string]string{
+				"error": "a bootstrap token is required to create the first account; it is printed to the server log at startup",
+			})
+		}
 	}
 
 	user, err := qtx.CreateUser(ctx, db.CreateUserParams{
@@ -361,7 +424,47 @@ func (h *authHandlers) signin(c *echo.Context) error {
 		TargetID:      &uid,
 		TargetName:    user.Username,
 	})
-	return h.issueAndRespond(c, user)
+	return h.issueAndRespondWithHandoff(c, user, req.ReturnToHost, req.HandoffCnf, req.ReturnTo)
+}
+
+// handoffURLFor mints the cross-host return leg for a session just established on
+// the control plane, or returns "" when there is nothing to hand off.
+//
+// This is the leg that makes confining the sign-in form to TORII_URL workable:
+// dispatch sends an unauthenticated navigation on a service host here, and this
+// sends the browser back with a 30-second single-use token instead of ever putting
+// a password form on the upstream's origin.
+//
+// correlatorDigest is mandatory and comes from the service host's own redirect, so
+// a caller cannot manufacture a handoff for a host it never visited.
+func (h *authHandlers) handoffURLFor(c *echo.Context, user db.User, returnToHost, correlatorDigest, returnTo string) string {
+	if returnToHost == "" || correlatorDigest == "" {
+		return ""
+	}
+	// Only ever minted on the control plane. On a service host there is nothing to
+	// hand off — the session was just set there.
+	if !h.cfg.IsToriiHost(c.Request().Host) {
+		return ""
+	}
+	ctx := c.Request().Context()
+	if !h.isKnownServiceHost(ctx, returnToHost) {
+		return ""
+	}
+	tok, err := auth.IssueHandoffToken(user.ID, returnToHost, correlatorDigest, h.cfg.JWTSecret)
+	if err != nil {
+		return ""
+	}
+	scheme := "https"
+	if !h.cfg.IsProd() {
+		scheme = "http"
+	}
+	u := scheme + "://" + returnToHost + "/_torii/handoff"
+	if to := safeRelativeRedirect(returnTo); to != "/" {
+		u += "?to=" + url.QueryEscape(to)
+	}
+	// Fragment, not query: the token mints a session, and a fragment is never sent
+	// to a server, never logged, and never appears in a Referer.
+	return u + "#token=" + tok
 }
 
 func (h *authHandlers) tokenRefresh(c *echo.Context) error {
@@ -529,9 +632,89 @@ func (h *authHandlers) issueSession(ctx context.Context, c *echo.Context, user d
 func (h *authHandlers) refreshAndRedirect(c *echo.Context) error {
 	to := safeRelativeRedirect(c.QueryParam("to"))
 	if _, err := h.AttemptCookieRefresh(c); err != nil {
-		return c.Redirect(http.StatusFound, "/_torii/signin")
+		// Absolute, to the control plane: this endpoint answers on service hosts,
+		// and a relative /_torii/signin would land the user on a sign-in page
+		// served from the upstream's origin. That page no longer exists off-host,
+		// so a relative redirect would also simply 404.
+		return c.Redirect(http.StatusFound, h.controlPlaneSigninURL(c))
 	}
 	return c.Redirect(http.StatusFound, to)
+}
+
+// handoffStart bridges an existing control-plane session onto a proxied service
+// host. dispatch sends an unauthenticated navigation on a service host here
+// rather than straight to the sign-in form, because the common case is a user who
+// is *already* signed in on TORII_URL: cookies are host-scoped, so holding a
+// session on the control plane says nothing about holding one on the service
+// host, and no credential prompt is needed to bridge the gap.
+//
+// Redirecting to /signin instead was a dead end — that page carries the `guest`
+// middleware, which bounces an authenticated visitor to /dashboard, so the handoff
+// never ran and the service was unreachable.
+//
+// Control-plane only: absent from crossHostEndpoints, so it 404s on a service host.
+func (h *authHandlers) handoffStart(c *echo.Context) error {
+	rh := c.QueryParam("return_to_host")
+	cnf := c.QueryParam("handoff_cnf")
+	to := safeRelativeRedirect(c.QueryParam("to"))
+
+	// No session (or nothing to hand off): fall through to the credential form,
+	// carrying the correlator so signin can complete the same handoff afterwards.
+	toSignin := func() error {
+		q := url.Values{}
+		if rh != "" && cnf != "" {
+			q.Set("return_to_host", rh)
+			q.Set("handoff_cnf", cnf)
+		}
+		if to != "/" {
+			q.Set("to", to)
+		}
+		target := "/_torii/signin"
+		if len(q) > 0 {
+			target += "?" + q.Encode()
+		}
+		return c.Redirect(http.StatusFound, target)
+	}
+
+	claims, err := auth.ClaimsFromRequest(c, h.cfg.JWTSecret)
+	if err != nil {
+		// An expired access token is the norm here, not the exception: the default
+		// TTL is one minute. The refresh cookie is scoped to /_torii/api/v1/, which
+		// this endpoint lives under, so it rides along on this very request.
+		claims, err = h.AttemptCookieRefresh(c)
+		if err != nil {
+			return toSignin()
+		}
+	}
+	uid, err := uuid.Parse(claims.Subject)
+	if err != nil {
+		return toSignin()
+	}
+	user, err := h.q.GetUserByID(c.Request().Context(), uid)
+	if err != nil {
+		return toSignin()
+	}
+	if u := h.handoffURLFor(c, user, rh, cnf, to); u != "" {
+		return c.Redirect(http.StatusFound, u)
+	}
+	// Authenticated but the handoff was refused — an unregistered service host, or
+	// a correlator that never made it through the bounce. The sign-in form would
+	// just bounce back off the guest middleware, so land them somewhere real.
+	return c.Redirect(http.StatusFound, "/_torii/dashboard")
+}
+
+// controlPlaneSigninURL is the absolute sign-in URL on TORII_URL. Kept here
+// rather than reusing cmd's helper because this path has no correlator to mint:
+// the refresh already failed, so there is no session to hand back.
+func (h *authHandlers) controlPlaneSigninURL(c *echo.Context) string {
+	if h.cfg.IsToriiHost(c.Request().Host) {
+		return "/_torii/signin"
+	}
+	scheme := "https"
+	if !h.cfg.IsProd() {
+		scheme = "http"
+	}
+	return scheme + "://" + h.cfg.ToriiURL + "/_torii/signin"
 }
 
 // safeRelativeRedirect returns target if and only if it is a same-origin
@@ -561,33 +744,59 @@ func safeRelativeRedirect(target string) string {
 // response, and returns the new claims. On failure it returns nil and clears
 // auth cookies. Used by the proxy dispatch so that an expired access token on
 // a proxied service domain doesn't fall through to the SPA.
+//
+// This is the second refresh path, and every hardening tokenRefresh received had
+// to be mirrored here or the weaker one is simply the one an attacker uses. It
+// previously diverged in three ways: it used the non-atomic
+// GetRefreshTokenByHash + delete that ConsumeRefreshTokenByHash was introduced to
+// replace, so two simultaneous presentations of one stolen token both succeeded
+// and forked it into two chains; it omitted the locked_until check, so a live
+// refresh token rode straight through a lockout that had shut the password path;
+// and it emitted no audit event at all, so failures on it were invisible.
 func (h *authHandlers) AttemptCookieRefresh(c *echo.Context) (*auth.Claims, error) {
 	secure := h.cfg.IsProd()
 	ctx := c.Request().Context()
 
+	refreshFail := func(reason string, uid *uuid.UUID) {
+		h.auditor.LogFromEcho(c, audit.Event{
+			EventType:   audit.EventTokenRefreshFailed,
+			ActorUserID: uid,
+			Metadata:    map[string]any{"reason": reason, "path": "refresh_and_redirect"},
+		})
+	}
+
 	cookie, err := c.Cookie(auth.RefreshCookie)
 	if err != nil || cookie.Value == "" {
+		refreshFail("missing_cookie", nil)
 		return nil, errors.New("no refresh cookie")
 	}
 	hash := auth.HashRefreshToken(cookie.Value)
 
-	row, err := h.q.GetRefreshTokenByHash(ctx, hash)
+	// Consume in one statement, for the same reason tokenRefresh does.
+	row, err := h.q.ConsumeRefreshTokenByHash(ctx, hash)
 	if err != nil {
 		auth.ClearAuthCookies(c, secure)
+		refreshFail("invalid_token", nil)
 		return nil, err
 	}
 	if !row.ExpiresAt.Valid || time.Now().After(row.ExpiresAt.Time) || row.RevokedAt.Valid {
-		_ = h.q.DeleteRefreshTokenByHash(ctx, hash)
 		auth.ClearAuthCookies(c, secure)
+		uid := row.UserID
+		refreshFail("expired_or_revoked", &uid)
 		return nil, errors.New("refresh token expired or revoked")
 	}
 	user, err := h.q.GetUserByID(ctx, row.UserID)
 	if err != nil {
 		auth.ClearAuthCookies(c, secure)
+		uid := row.UserID
+		refreshFail("user_not_found", &uid)
 		return nil, err
 	}
-	if err := h.q.DeleteRefreshTokenByHash(ctx, hash); err != nil {
-		return nil, err
+	if user.LockedUntil.Valid && time.Now().Before(user.LockedUntil.Time) {
+		auth.ClearAuthCookies(c, secure)
+		uid := user.ID
+		refreshFail("account_locked", &uid)
+		return nil, errors.New("account locked")
 	}
 	accessTok, _, _, err := h.issueSession(ctx, c, user)
 	if err != nil {
@@ -597,6 +806,10 @@ func (h *authHandlers) AttemptCookieRefresh(c *echo.Context) (*auth.Claims, erro
 }
 
 func (h *authHandlers) issueAndRespond(c *echo.Context, user db.User) error {
+	return h.issueAndRespondWithHandoff(c, user, "", "", "")
+}
+
+func (h *authHandlers) issueAndRespondWithHandoff(c *echo.Context, user db.User, returnToHost, correlatorDigest, returnTo string) error {
 	access, roles, perms, err := h.issueSession(c.Request().Context(), c, user)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
@@ -615,5 +828,6 @@ func (h *authHandlers) issueAndRespond(c *echo.Context, user db.User) error {
 	if h.cfg.IsToriiHost(c.Request().Host) {
 		resp.AccessToken = access
 	}
+	resp.HandoffURL = h.handoffURLFor(c, user, returnToHost, correlatorDigest, returnTo)
 	return c.JSON(http.StatusOK, resp)
 }

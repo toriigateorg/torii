@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -105,6 +108,10 @@ type Logger struct {
 	fileErr  error
 	fileMu   sync.Mutex
 	debounce sync.Map // key "userID|serviceID" -> time.Time
+	// dbFailures counts audit rows the database sink rejected. Surfaced at /ht/
+	// so a sink divergence is observable rather than only being visible as a
+	// stderr line nobody is tailing.
+	dbFailures atomic.Int64
 }
 
 // FileOK reports whether the JSON-lines sink is operational. Exposed so the
@@ -117,6 +124,16 @@ func (l *Logger) FileOK() bool {
 	l.fileMu.Lock()
 	defer l.fileMu.Unlock()
 	return l.file != nil && l.fileErr == nil
+}
+
+// DBFailures reports how many events the database sink has rejected since
+// startup. Non-zero means the trail the product reads is missing records the file
+// sink has.
+func (l *Logger) DBFailures() int64 {
+	if l == nil {
+		return 0
+	}
+	return l.dbFailures.Load()
 }
 
 type Event struct {
@@ -229,9 +246,13 @@ func (l *Logger) Close() error {
 	return l.file.Close()
 }
 
-func (l *Logger) Log(ctx context.Context, e Event) {
+// Log writes the event to both sinks. It returns the database sink's error, if
+// any: the database is the sink every product surface reads, so a caller that
+// gates state on "this was recorded" — the proxy-access debounce — has to be able
+// to tell. A file-sink failure is not returned; it is reported through FileOK.
+func (l *Logger) Log(ctx context.Context, e Event) error {
 	if l == nil {
-		return
+		return nil
 	}
 	now := time.Now().UTC()
 	e.clamp()
@@ -249,8 +270,9 @@ func (l *Logger) Log(ctx context.Context, e Event) {
 		targetID = uuid.NullUUID{UUID: *e.TargetID, Valid: true}
 	}
 
+	var dbErr error
 	if l.q != nil {
-		_, dbErr := l.q.InsertAuditLog(ctx, db.InsertAuditLogParams{
+		_, dbErr = l.q.InsertAuditLog(ctx, db.InsertAuditLogParams{
 			EventType:     e.EventType,
 			ActorUserID:   actorID,
 			ActorUsername: e.ActorUsername,
@@ -262,6 +284,7 @@ func (l *Logger) Log(ctx context.Context, e Event) {
 			Metadata:      metaBytes,
 		})
 		if dbErr != nil {
+			l.dbFailures.Add(1)
 			fmt.Fprintln(os.Stderr, "[audit] db insert failed:", dbErr)
 		}
 	}
@@ -278,20 +301,26 @@ func (l *Logger) Log(ctx context.Context, e Event) {
 		"user_agent":     e.UserAgent,
 		"metadata":       e.Metadata,
 	}
+	// Record the divergence in the sink that did accept the record, so "present in
+	// audit.jsonl, absent from audit_logs" is a stated fact rather than something
+	// to be discovered by diffing the two.
+	if dbErr != nil {
+		line["db_insert_error"] = dbErr.Error()
+	}
 	buf, err := json.Marshal(line)
 	if err != nil {
-		return
+		return dbErr
 	}
 	buf = append(buf, '\n')
 	l.fileMu.Lock()
 	defer l.fileMu.Unlock()
 	if l.file == nil {
-		return
+		return dbErr
 	}
 	if l.fileSize+int64(len(buf)) > maxAuditFileBytes {
 		l.rotateLocked()
 		if l.file == nil {
-			return
+			return dbErr
 		}
 	}
 	n, werr := l.file.Write(buf)
@@ -299,31 +328,112 @@ func (l *Logger) Log(ctx context.Context, e Event) {
 	if werr != nil {
 		l.fileErr = werr
 	}
+	return dbErr
 }
 
-// clamp bounds every attacker-influenced string on the event. Nothing here is
-// security-relevant to keep in full: the values are for human reading, and an
-// unbounded one lets a caller choose how many bytes its own request costs in
-// both sinks.
+// clamp bounds and sanitises every attacker-influenced string on the event.
+// Nothing here is security-relevant to keep verbatim: the values are for human
+// reading, an unbounded one lets a caller choose how many bytes its own request
+// costs in both sinks, and a control byte in one lets a caller decide whether the
+// record persists at all.
 func (e *Event) clamp() {
-	e.EventType = truncate(e.EventType, maxMetaStrLen)
-	e.ActorUsername = truncate(e.ActorUsername, maxMetaStrLen)
-	e.TargetName = truncate(e.TargetName, maxMetaStrLen)
-	e.ClientIP = truncate(e.ClientIP, maxMetaStrLen)
-	e.UserAgent = truncate(e.UserAgent, maxUserAgentLen)
-	for k, v := range e.Metadata {
-		s, ok := v.(string)
-		if !ok {
-			continue
-		}
+	e.EventType = clampField(e.EventType, maxMetaStrLen)
+	e.ActorUsername = clampField(e.ActorUsername, maxMetaStrLen)
+	e.TargetName = clampField(e.TargetName, maxMetaStrLen)
+	e.ClientIP = clampField(e.ClientIP, maxMetaStrLen)
+	e.UserAgent = clampField(e.UserAgent, maxUserAgentLen)
+	clampMap(e.Metadata, 0)
+}
+
+// maxMetaDepth bounds recursion through nested metadata. Snapshots are shallow;
+// this only exists so a pathological structure cannot recurse without limit.
+const maxMetaDepth = 8
+
+// clampMap sanitises a metadata map in place, recursing into nested maps and
+// slices. Recursion matters: the snapshot helpers nest a whole "before"/"after"
+// sub-map under one key, and clamping only top-level values left every one of
+// those unsanitised.
+func clampMap(m map[string]any, depth int) {
+	if m == nil || depth > maxMetaDepth {
+		return
+	}
+	for k, v := range m {
 		limit := maxMetaStrLen
 		if k == "path" || k == "host" {
 			limit = maxPathLen
 		}
-		if len(s) > limit {
-			e.Metadata[k] = truncate(s, limit)
+		m[k] = clampValue(v, limit, depth)
+	}
+}
+
+func clampValue(v any, limit, depth int) any {
+	switch t := v.(type) {
+	case string:
+		return clampField(t, limit)
+	case map[string]any:
+		clampMap(t, depth+1)
+		return t
+	case []any:
+		if depth <= maxMetaDepth {
+			for i, e := range t {
+				t[i] = clampValue(e, limit, depth+1)
+			}
+		}
+		return t
+	case []string:
+		if depth <= maxMetaDepth {
+			for i, e := range t {
+				t[i] = clampField(e, limit)
+			}
+		}
+		return t
+	default:
+		return v
+	}
+}
+
+func clampField(s string, limit int) string {
+	return stripControlBytes(truncate(s, limit))
+}
+
+// stripControlBytes replaces C0 control characters and DEL with U+FFFD.
+//
+// This is load-bearing, not cosmetic. json.Marshal happily encodes a NUL as its
+// six-character JSON escape, but PostgreSQL's jsonb input function rejects that
+// escape (it cannot be represented in text), and TEXT columns reject a literal
+// NUL — so the INSERT into audit_logs failed while the JSONL sink wrote the record
+// successfully. Every product surface that reads the trail (GET /admin/audit,
+// /admin/stats, `torii audit prune`) reads only the database, so a single
+// percent-encoded NUL in a path segment the caller chooses removed the event from
+// the entire product. The events this matters for are the authenticated ones: the
+// onDenied hook shared by every RequirePermission gate records URL.Path, as do the
+// privilege-guard denials — precisely the escalation attempts an incident
+// responder queries for.
+//
+// Tab, LF and CR are stripped along with the rest: nothing in an audit field has
+// a legitimate use for them, and leaving them in lets a caller forge line
+// structure in the JSONL sink.
+func stripControlBytes(s string) string {
+	needs := false
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] == 0x7f {
+			needs = true
+			break
 		}
 	}
+	if !needs {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			b.WriteRune(utf8.RuneError)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // truncate cuts s to at most n bytes without splitting a UTF-8 rune, so the
@@ -338,9 +448,9 @@ func truncate(s string, n int) string {
 	return s[:n]
 }
 
-func (l *Logger) LogFromEcho(c *echo.Context, e Event) {
+func (l *Logger) LogFromEcho(c *echo.Context, e Event) error {
 	if l == nil {
-		return
+		return nil
 	}
 	if c != nil {
 		if e.ClientIP == "" {
@@ -361,10 +471,9 @@ func (l *Logger) LogFromEcho(c *echo.Context, e Event) {
 				}
 			}
 		}
-		l.Log(c.Request().Context(), e)
-		return
+		return l.Log(c.Request().Context(), e)
 	}
-	l.Log(context.Background(), e)
+	return l.Log(context.Background(), e)
 }
 
 func (l *Logger) LogProxyAccess(c *echo.Context, userID uuid.UUID, username string, svcID uuid.UUID, svcName string) {
@@ -378,11 +487,10 @@ func (l *Logger) LogProxyAccess(c *echo.Context, userID uuid.UUID, username stri
 			return
 		}
 	}
-	l.debounce.Store(key, now)
 
 	uid := userID
 	sid := svcID
-	l.LogFromEcho(c, Event{
+	err := l.LogFromEcho(c, Event{
 		EventType:     EventProxyAccess,
 		ActorUserID:   &uid,
 		ActorUsername: username,
@@ -395,6 +503,13 @@ func (l *Logger) LogProxyAccess(c *echo.Context, userID uuid.UUID, username stri
 			"method": c.Request().Method,
 		},
 	})
+	// Armed only after the database sink accepted the row. Storing it first meant
+	// one request whose record the database rejected both failed to persist and
+	// suppressed the whole next window, so a single poisoned request per five
+	// minutes erased that user's proxy-access trail entirely.
+	if err == nil {
+		l.debounce.Store(key, now)
+	}
 }
 
 // LogProxyDenied records a proxy denial, debounced per (client, service, reason)
@@ -409,15 +524,34 @@ func (l *Logger) LogProxyDenied(c *echo.Context, e Event, reason string) {
 	if e.TargetID != nil {
 		svc = e.TargetID.String()
 	}
-	key := "denied|" + c.RealIP() + "|" + svc + "|" + reason
+	// Keyed on the /64-folded client address, matching the rate limiter. Keying on
+	// the raw IP let one v6 client cycle addresses within its own prefix and get a
+	// fresh debounce bucket per request, which is the write amplification the
+	// debounce exists to stop.
+	key := "denied|" + debounceIPKey(c.RealIP()) + "|" + svc + "|" + reason
 	now := time.Now()
 	if v, ok := l.debounce.Load(key); ok {
 		if last, ok := v.(time.Time); ok && now.Sub(last) < deniedDebounce {
 			return
 		}
 	}
-	l.debounce.Store(key, now)
-	l.LogFromEcho(c, e)
+	if err := l.LogFromEcho(c, e); err == nil {
+		l.debounce.Store(key, now)
+	}
+}
+
+// debounceIPKey folds an IPv6 address to its /64 so the debounce bucket matches
+// the rate limiter's. IPv4 and unparseable values are returned as-is.
+func debounceIPKey(ip string) string {
+	parsed := net.ParseIP(ip)
+	if parsed == nil || parsed.To4() != nil {
+		return ip
+	}
+	masked := parsed.Mask(net.CIDRMask(64, 128))
+	if masked == nil {
+		return ip
+	}
+	return masked.String() + "/64"
 }
 
 func nullableUUID(p *uuid.UUID) any {

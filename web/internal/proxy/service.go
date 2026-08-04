@@ -58,14 +58,31 @@ var toriiOwnedHeaders = map[string]struct{}{
 }
 
 // shadowableForwardedHeaders are set authoritatively by torii (X-Forwarded-Host
-// / -Proto) or appended by ReverseProxy (X-Forwarded-For). Only underscore
-// spellings are dropped: the dash forms are torii's own output, and discarding
-// an inbound X-Forwarded-For would throw away a trusted proxy's client chain
-// before ReverseProxy appends to it.
+// / -Proto) or appended by ReverseProxy (X-Forwarded-For). Both spellings are
+// dropped: the dash forms are torii's own output, so an inbound copy can only be
+// a client trying to prepend to them.
 var shadowableForwardedHeaders = map[string]struct{}{
 	"x-forwarded-for":   {},
 	"x-forwarded-host":  {},
 	"x-forwarded-proto": {},
+}
+
+// untrustedClientIPHeaders are the other conventions an upstream may read to
+// decide "who is the client". torii sets none of them, so a deployment that
+// consumed one would be visibly broken — but a *client* can set all of them, and
+// an upstream that reads one is reading an attacker-chosen address. Deleting
+// them unconditionally makes the absence explicit rather than incidental.
+//
+// X-Forwarded-For is handled separately in stripForwardedHeaders: unlike these,
+// torii does produce it, and a value arriving from a configured trusted proxy is
+// a real client chain that must survive.
+var untrustedClientIPHeaderSet = map[string]struct{}{
+	"x-real-ip":        {},
+	"x-client-ip":      {},
+	"true-client-ip":   {},
+	"cf-connecting-ip": {},
+	"fastly-client-ip": {},
+	"forwarded":        {},
 }
 
 // Fail at startup rather than silently forwarding a credential header if one of
@@ -98,6 +115,33 @@ func stripClientHeaders(h http.Header) {
 	}
 }
 
+// stripForwardedHeaders drops the client-IP assertions torii will not stand
+// behind. trustedPeer says whether the immediate peer is a configured trusted
+// proxy — the same gate RealIP() uses.
+//
+// The inbound X-Forwarded-For was previously preserved on the reasoning that
+// ReverseProxy appends to it and a trusted proxy's chain must survive. That is
+// true of a trusted peer and false of everyone else: from an untrusted peer the
+// whole chain is client-authored, and an upstream reading the leftmost entry —
+// the common and otherwise correct idiom — reads an attacker-chosen address.
+// So the header is kept only when the peer earned it, and rebuilt from
+// RemoteAddr by ReverseProxy otherwise.
+// Matching on the normalized name rather than calling Del is deliberate, for the
+// same reason stripClientHeaders does: Del canonicalizes, so it would miss an
+// "X_Real_Ip" spelling that an upstream folding "_" to "-" still reads.
+func stripForwardedHeaders(h http.Header, trustedPeer bool) {
+	for k := range h {
+		n := normalizeHeaderName(k)
+		if _, drop := untrustedClientIPHeaderSet[n]; drop {
+			delete(h, k)
+			continue
+		}
+		if !trustedPeer && n == "x-forwarded-for" {
+			delete(h, k)
+		}
+	}
+}
+
 // ProxyTo reverse-proxies the request to the cached service's target. It
 // strips torii-owned authentication material from the request, injects signed
 // identity headers describing the caller, and applies the per-service header
@@ -109,10 +153,11 @@ func ProxyTo(svc *CachedService, ident Identity, c *echo.Context) error {
 	// X-Forwarded-Proto is only consulted when the peer is a configured trusted
 	// proxy, because any client can set it and upstreams build absolute links
 	// and redirects from what we forward.
+	trustedPeer := PeerIsTrustedProxy(inbound)
 	origProto := "http"
 	if inbound.TLS != nil {
 		origProto = "https"
-	} else if PeerIsTrustedProxy(inbound) && strings.EqualFold(inbound.Header.Get("X-Forwarded-Proto"), "https") {
+	} else if trustedPeer && strings.EqualFold(inbound.Header.Get("X-Forwarded-Proto"), "https") {
 		origProto = "https"
 	}
 
@@ -192,6 +237,9 @@ func ProxyTo(svc *CachedService, ident Identity, c *echo.Context) error {
 		// which sources the torii credential from X-Torii-Authorization / the
 		// access cookie instead.
 		stripClientHeaders(req.Header)
+		// Runs before ReverseProxy's own X-Forwarded-For append, so dropping the
+		// header here leaves the append to rebuild it from RemoteAddr.
+		stripForwardedHeaders(req.Header, trustedPeer)
 		stripCookies(req, auth.AccessCookie, auth.RefreshCookie, auth.SessionCookie)
 
 		// ReverseProxy strips hop-by-hop headers AFTER the director runs, and

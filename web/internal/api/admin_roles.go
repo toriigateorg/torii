@@ -286,7 +286,36 @@ func (h *authHandlers) adminDeleteRole(c *echo.Context) error {
 	if role.IsSystem {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "cannot delete a system role"})
 	}
+	// Deletion is a strict superset of emptying: role_permissions, user_roles and
+	// role_services all cascade (migration 0004). adminSetRolePermissions guards
+	// the emptying case against exactly this — a delegated operator stripping
+	// authority it does not hold — but roles.delete is an independently grantable
+	// permission, so without the same check here roles.delete was strictly more
+	// powerful than roles.update against the same object, and the guard was
+	// bypassable by whoever held the differently named one.
+	//
+	// callerCanGrantRole is the right predicate: the caller holds every permission
+	// the role carries and reaches every service it binds.
+	claims := auth.ClaimsFrom(c)
+	canGrant, err := h.callerCanGrantRole(ctx, claims, id)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
+	if !canGrant {
+		h.logRoleGrantDenied(c, audit.TargetRole, id, role.Name, role)
+		return c.JSON(http.StatusForbidden, map[string]string{"error": errCannotDeleteRole})
+	}
+	// Captured before the delete so the audit trail records what would have to be
+	// rebuilt: DeleteRole drops the rows and SnapshotRole does not include them.
+	beforePerms, _ := h.q.ListRolePermissions(ctx, id)
+	beforeServices, _ := h.q.ListRoleServices(ctx, id)
 	before := audit.SnapshotRole(role)
+	before["permissions"] = beforePerms
+	svcIDs := make([]string, 0, len(beforeServices))
+	for _, s := range beforeServices {
+		svcIDs = append(svcIDs, s.ID.String())
+	}
+	before["service_ids"] = svcIDs
 	if err := h.q.DeleteRole(ctx, id); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not delete role"})
 	}
@@ -513,6 +542,26 @@ func (h *authHandlers) adminRevokeRoleService(c *echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+// roleMemberDTO is the reference view of a role's member: enough to render the
+// membership list and nothing more.
+//
+// Deliberately NOT the admin userDTO. This endpoint is gated on roles.read
+// alone, and userDTO carries the member's full permission set, sso_only and
+// locked_until — so listing the system 'all' role, which every account holds,
+// returned the entire directory with the authorization state of every account in
+// it. That is target selection for the privilege-guard and lockout paths. Its one
+// consumer (the Members tab in admin/model/roles.vue) renders username and email.
+type roleMemberDTO struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	Email    string `json:"email"`
+}
+
+type adminRoleUserListResp struct {
+	pageMeta
+	Items []roleMemberDTO `json:"items"`
+}
+
 func (h *authHandlers) adminListRoleUsers(c *echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -528,15 +577,15 @@ func (h *authHandlers) adminListRoleUsers(c *echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not count users"})
 	}
-	items := make([]userDTO, 0, len(rows))
+	items := make([]roleMemberDTO, 0, len(rows))
 	for _, u := range rows {
-		roles, perms, _, err := h.loadUserAuthz(ctx, u.ID)
-		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not load roles"})
-		}
-		items = append(items, toDTO(u, roles, perms))
+		items = append(items, roleMemberDTO{
+			ID:       u.ID.String(),
+			Username: u.Username,
+			Email:    u.Email,
+		})
 	}
-	return c.JSON(http.StatusOK, adminUserListResp{
+	return c.JSON(http.StatusOK, adminRoleUserListResp{
 		pageMeta: pageMeta{Page: page, PageSize: pageSize, Total: total},
 		Items:    items,
 	})

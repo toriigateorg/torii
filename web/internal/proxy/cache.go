@@ -52,12 +52,30 @@ func (s *CachedService) AllowsAnyRole(roleIDs []uuid.UUID) bool {
 	return false
 }
 
+// refreshBackoff is how long a failed refresh keeps serving the previous map
+// before another Lookup is allowed to retry, so a broken database is not
+// re-queried once per request.
+//
+// refreshTimeout bounds a single refresh query. It has to exist because the
+// refresh no longer runs on a request context (see refreshLocked), so nothing
+// else would ever cancel it — and it runs under the cache write lock, which
+// every proxied request queues behind.
+const (
+	refreshBackoff = 5 * time.Second
+	refreshTimeout = 10 * time.Second
+)
+
 type ServiceCache struct {
 	mu       sync.RWMutex
 	byDomain map[string]*CachedService
 	loadedAt time.Time
-	ttl      time.Duration
-	q        *db.Queries
+	// retryAfter is set when a refresh fails, and is what keeps the stale map in
+	// service for refreshBackoff. It used to be expressed by backdating loadedAt,
+	// which made fresh() report a successful load that had not happened and put
+	// the backoff window at odds with the comment describing it.
+	retryAfter time.Time
+	ttl        time.Duration
+	q          *db.Queries
 	// blockLoopback mirrors cfg.BlockLoopbackUpstreams and is applied by the
 	// dial-time SSRF guard installed on each service transport.
 	blockLoopback bool
@@ -73,10 +91,22 @@ func NewServiceCache(q *db.Queries, ttl time.Duration, blockLoopback bool) *Serv
 }
 
 func (c *ServiceCache) fresh() bool {
-	return !c.loadedAt.IsZero() && time.Since(c.loadedAt) < c.ttl
+	if !c.loadedAt.IsZero() && time.Since(c.loadedAt) < c.ttl {
+		return true
+	}
+	return !c.retryAfter.IsZero() && time.Now().Before(c.retryAfter)
 }
 
-func (c *ServiceCache) Lookup(ctx context.Context, host string) (*CachedService, bool) {
+// Lookup resolves a host to its service, refreshing the cache when stale.
+//
+// ctx is deliberately not threaded into the refresh. Lookup is called from
+// dispatch on the client's request context, before authentication, so a client
+// that cancels mid-refresh used to abort a load of *shared* routing state: the
+// stale map survived and freshness was re-armed, meaning a deleted service kept
+// being proxied with its credential overlay, a revoked role_services binding kept
+// granting access, and a rotated signing secret kept signing. The refresh serves
+// every caller, so it gets its own lifetime.
+func (c *ServiceCache) Lookup(_ context.Context, host string) (*CachedService, bool) {
 	c.mu.RLock()
 	if c.fresh() {
 		svc, ok := c.byDomain[host]
@@ -88,7 +118,9 @@ func (c *ServiceCache) Lookup(ctx context.Context, host string) (*CachedService,
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.fresh() {
-		c.refreshLocked(ctx)
+		refreshCtx, cancel := context.WithTimeout(context.Background(), refreshTimeout)
+		c.refreshLocked(refreshCtx)
+		cancel()
 	}
 	svc, ok := c.byDomain[host]
 	return svc, ok
@@ -97,6 +129,9 @@ func (c *ServiceCache) Lookup(ctx context.Context, host string) (*CachedService,
 func (c *ServiceCache) Invalidate() {
 	c.mu.Lock()
 	c.loadedAt = time.Time{}
+	// Cleared too, or an Invalidate landing inside a post-failure backoff window
+	// would be silently ignored for the rest of it.
+	c.retryAfter = time.Time{}
 	c.mu.Unlock()
 }
 
@@ -108,11 +143,10 @@ func (c *ServiceCache) refreshLocked(ctx context.Context) {
 		// the operator notices DB issues instead of debugging "why aren't
 		// my service config changes showing up" silently.
 		fmt.Fprintln(os.Stderr, "[proxy] service cache refresh failed:", err)
-		// Bump loadedAt to "stale ttl ago" so we don't re-hammer a broken
-		// DB on every request — back off for one TTL.
-		c.loadedAt = time.Now().Add(-c.ttl + 5*time.Second)
+		c.retryAfter = time.Now().Add(refreshBackoff)
 		return
 	}
+	c.retryAfter = time.Time{}
 	next := make(map[string]*CachedService, len(rows))
 	for _, r := range rows {
 		target, err := url.Parse(r.ServiceUrl)

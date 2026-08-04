@@ -30,15 +30,26 @@ type SessionRefresher interface {
 const apiPrefix = "/_torii/api/v1"
 
 // crossHostEndpoints are the only API paths answered on a proxied service host.
-// A service host needs exactly enough of the API to get a user signed in there
-// (cookies are host-scoped, so the flow reruns per domain) and to keep the
-// signin / forbidden pages functional. Everything else — the whole /admin
-// surface above all — is control plane and belongs to TORII_URL only.
+// A service host needs exactly enough of the API to establish and maintain a
+// session that was *granted elsewhere* — cookies are host-scoped, so the session
+// has to be materialised per domain — plus enough to keep the handoff and
+// forbidden pages functional. Everything else, the whole /admin surface above
+// all, is control plane and belongs to TORII_URL only.
+//
+// Credential collection is deliberately absent. /signin and /signup used to be
+// here, which meant torii served a working password form and a working
+// POST /signin on every proxied upstream's origin — and dispatch actively
+// redirected expired sessions there. Any script on that origin (a hostile
+// upstream operator, one stored or reflected XSS, a compromised front-end
+// dependency) was same-origin with the form and the endpoint, and the password it
+// captured has no host binding: signin resolves the global users table, so it
+// replays on the control plane and on every other service. That defeats the
+// per-host JWT audience and the off-host token suppression, both of which name
+// upstream script as the threat they exist for. Cross-host login now completes on
+// TORII_URL and returns via the single-use handoff token.
 var crossHostEndpoints = map[string]struct{}{
 	"/health":               {},
 	"/ht/":                  {},
-	"/signin":               {},
-	"/signup":               {},
 	"/logout":               {},
 	"/token_refresh":        {},
 	"/refresh_and_redirect": {},
@@ -105,12 +116,19 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 		// sink still records everything, so a bad log directory should not take
 		// the deployment out of rotation.
 		auditFileOK := auditor != nil && auditor.FileOK()
-		return c.JSON(http.StatusOK, map[string]bool{
-			"all":        dbOK,
-			"db":         dbOK,
-			"api":        true,
-			"audit_db":   auditor != nil && dbOK,
-			"audit_file": auditFileOK,
+		// audit_db_rejected is the count of events the database sink refused while
+		// the file sink accepted them. Non-zero means /admin/audit and
+		// /admin/stats are missing records that exist on disk — the shape a caller
+		// gets by putting a control byte into a field that ends up in the trail.
+		// Excluded from "all" for the same reason audit_file is: the trail is
+		// degraded, the gateway is not.
+		return c.JSON(http.StatusOK, map[string]any{
+			"all":               dbOK,
+			"db":                dbOK,
+			"api":               true,
+			"audit_db":          auditor != nil && dbOK,
+			"audit_file":        auditFileOK,
+			"audit_db_rejected": auditor.DBFailures(),
 		})
 	})
 
@@ -142,6 +160,11 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	v1.POST("/signin", h.signin, authLimiter)
 	v1.POST("/token_refresh", h.tokenRefresh, refreshLimiter)
 	v1.GET("/refresh_and_redirect", h.refreshAndRedirect, refreshLimiter)
+	// handoff_start turns an existing control-plane session into a session on a
+	// proxied service host. Control plane only (absent from crossHostEndpoints);
+	// authentication is optional inside the handler, which falls through to the
+	// sign-in form when there is none.
+	v1.GET("/handoff_start", h.handoffStart, refreshLimiter)
 	// logoutLimiter: /logout is unauthenticated, allowlisted on every proxied
 	// host, and writes an audit event to two sinks per call, which made it the
 	// cheapest unauthenticated write amplifier in the API. It gets its own

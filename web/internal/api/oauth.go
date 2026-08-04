@@ -33,6 +33,7 @@ const (
 	ssoStateCookie      = "sso_state"
 	ssoNonceCookie      = "sso_nonce"
 	ssoReturnHostCookie = "sso_return_host"
+	ssoHandoffCnfCookie = "sso_handoff_cnf"
 	ssoCookiePath       = "/_torii/api/v1/oauth/"
 	ssoCookieTTL        = 10 * time.Minute
 )
@@ -180,9 +181,17 @@ func (h *authHandlers) publicAuthConfig(c *echo.Context) error {
 	for _, r := range rows {
 		items = append(items, publicProviderDTO{Slug: r.Slug, Name: r.Name})
 	}
+	// bootstrap_required tells the signup page to ask for the one-time token the
+	// server printed to stderr at startup. It is derived from the user count rather
+	// than from the token itself, so it never reveals whether a token is set.
+	bootstrapRequired := false
+	if count, err := h.q.CountUsers(ctx); err == nil && count == 0 {
+		bootstrapRequired = true
+	}
 	return c.JSON(http.StatusOK, map[string]any{
-		"providers":      items,
-		"signup_enabled": h.getBoolSetting(ctx, settingSignupEnabled, true),
+		"providers":          items,
+		"signup_enabled":     h.getBoolSetting(ctx, settingSignupEnabled, true),
+		"bootstrap_required": bootstrapRequired,
 	})
 }
 
@@ -260,27 +269,42 @@ func (h *authHandlers) oauthStart(c *echo.Context) error {
 		}
 		// Tag the bounce so /start on torii knows the user originated on a
 		// non-torii host and should be handed back there post-SSO.
-		q := c.Request().URL.Query()
-		if q.Get("return_to_host") == "" {
-			q.Set("return_to_host", c.Request().Host)
+		//
+		// This leg is also where the browser correlator is minted, because it is
+		// the last point in the flow that runs on the service host — the only host
+		// where a cookie the redemption endpoint can read is settable. The secret
+		// stays here in a host-scoped cookie; only its digest travels on.
+		secret, digest, err := auth.NewHandoffCorrelator()
+		if err != nil {
+			return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_internal")
 		}
+		auth.SetHandoffCorrelator(c, secret, h.cfg.IsProd())
+		q := c.Request().URL.Query()
+		q.Set("return_to_host", c.Request().Host)
+		q.Set("handoff_cnf", digest)
 		target := scheme + "://" + h.cfg.ToriiURL + c.Request().URL.Path + "?" + q.Encode()
 		return c.Redirect(http.StatusFound, target)
 	}
 
-	// Originating host carried over from the cross-host bounce above.
-	// Persist it in a cookie so /callback (which lands here on torii) can
-	// recover it after the IdP round-trip. Only honor known service hosts
-	// — falling back to torii otherwise — so an attacker can't use the
-	// bounce to land users on an arbitrary post-SSO destination.
-	if rh := c.QueryParam("return_to_host"); rh != "" {
-		if h.isKnownServiceHost(ctx, rh) {
-			h.setSSOTempCookie(c, ssoReturnHostCookie, rh)
-		} else {
-			h.clearSSOTempCookie(c, ssoReturnHostCookie)
-		}
+	// Originating host carried over from the cross-host bounce above, together
+	// with the correlator digest that bounce minted. Persisted in cookies so
+	// /callback (which lands here on torii) can recover them after the IdP
+	// round-trip. Only known service hosts are honoured — falling back to torii
+	// otherwise — so an attacker can't use the bounce to land users on an arbitrary
+	// post-SSO destination.
+	//
+	// A return_to_host without a digest is ignored outright. return_to_host is
+	// readable straight off the query string here, so honouring a bare one let a
+	// caller skip the service-host leg and therefore skip the correlator, which is
+	// exactly the browser binding the handoff token depends on.
+	rh := c.QueryParam("return_to_host")
+	cnf := c.QueryParam("handoff_cnf")
+	if rh != "" && cnf != "" && h.isKnownServiceHost(ctx, rh) {
+		h.setSSOTempCookie(c, ssoReturnHostCookie, rh)
+		h.setSSOTempCookie(c, ssoHandoffCnfCookie, cnf)
 	} else {
 		h.clearSSOTempCookie(c, ssoReturnHostCookie)
+		h.clearSSOTempCookie(c, ssoHandoffCnfCookie)
 	}
 
 	p, err := h.q.GetSSOProviderBySlug(ctx, slug)
@@ -464,16 +488,19 @@ func (h *authHandlers) oauthCallback(c *echo.Context) error {
 	// The handoff SPA page on the service host reads it out of the hash and
 	// POSTs it to /sso_handoff. Carrying it in the query would leak the live
 	// token to the upstream via the Referer of the post-handoff navigation.
-	if rh, err := c.Cookie(ssoReturnHostCookie); err == nil && rh.Value != "" {
-		h.clearSSOTempCookie(c, ssoReturnHostCookie)
-		if h.isKnownServiceHost(ctx, rh.Value) {
-			tok, err := auth.IssueHandoffToken(user.ID, rh.Value, h.cfg.JWTSecret)
+	rhCookie, rhErr := c.Cookie(ssoReturnHostCookie)
+	cnfCookie, cnfErr := c.Cookie(ssoHandoffCnfCookie)
+	h.clearSSOTempCookie(c, ssoReturnHostCookie)
+	h.clearSSOTempCookie(c, ssoHandoffCnfCookie)
+	if rhErr == nil && cnfErr == nil && rhCookie.Value != "" && cnfCookie.Value != "" {
+		if h.isKnownServiceHost(ctx, rhCookie.Value) {
+			tok, err := auth.IssueHandoffToken(user.ID, rhCookie.Value, cnfCookie.Value, h.cfg.JWTSecret)
 			if err == nil {
 				scheme := "https"
 				if !h.cfg.IsProd() {
 					scheme = "http"
 				}
-				return c.Redirect(http.StatusFound, scheme+"://"+rh.Value+"/_torii/handoff#token="+tok)
+				return c.Redirect(http.StatusFound, scheme+"://"+rhCookie.Value+"/_torii/handoff#token="+tok)
 			}
 		}
 	}
@@ -495,6 +522,13 @@ func (h *authHandlers) ssoHandoff(c *echo.Context) error {
 	c.Response().Header().Set("Referrer-Policy", "no-referrer")
 	c.Response().Header().Set("Cache-Control", "no-store")
 
+	// The handoff page POSTs same-origin. A cross-site caller has no legitimate
+	// reason to reach this, and refusing one removes the whole class of
+	// attacker-page-drives-redemption variants before the token is even parsed.
+	if !auth.IsSameOrigin(c.Request()) {
+		return handoffError(c)
+	}
+
 	var req struct {
 		Token string `json:"token"`
 	}
@@ -508,6 +542,14 @@ func (h *authHandlers) ssoHandoff(c *echo.Context) error {
 	if !sameNormalizedHost(claims.TargetHost, c.Request().Host) {
 		return handoffError(c)
 	}
+	// The correlator cookie was set on this host before the flow left it, so only
+	// the browser that started the handoff can present it. Checked before the jti
+	// burn so a relayed token does not consume the legitimate browser's one use.
+	cor, corErr := c.Cookie(auth.HandoffCorrelatorCookie)
+	if corErr != nil || cor == nil || !auth.VerifyHandoffCorrelator(cor.Value, claims.Confirmation) {
+		return handoffError(c)
+	}
+	auth.ClearHandoffCorrelator(c, h.cfg.IsProd())
 	uid, err := uuid.Parse(claims.Subject)
 	if err != nil {
 		return handoffError(c)
@@ -577,30 +619,71 @@ func (h *authHandlers) findOrCreateSSOUser(ctx context.Context, p db.SsoProvider
 	username := base
 	var user db.User
 	for i := 0; i < 6; i++ {
-		var err error
-		user, err = qtx.CreateUser(ctx, db.CreateUserParams{
-			Username:     username,
-			Email:        email,
-			FirstName:    claims.GivenName,
-			LastName:     claims.FamilyName,
-			PasswordHash: pgtype.Text{Valid: false},
-		})
-		if err == nil {
-			break
+		// The human and machine identity namespaces must not overlap: both are
+		// asserted upstream through X-Torii-Username, and users.username and
+		// api_users.name are separate tables with separate uniqueness, so an
+		// upstream keying on the username alone cannot tell them apart. The other
+		// three account-creation paths refuse a collision; this one checked neither
+		// table. Treated as a name collision rather than a hard failure so
+		// provisioning still succeeds under a suffixed name.
+		collides := false
+		if _, err := qtx.GetAPIUserByName(ctx, username); err == nil {
+			collides = true
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return db.User{}, "", errors.New("internal")
 		}
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			suffix, _ := randomB64(3)
-			username = base + "-" + strings.ToLower(suffix)
-			if len(username) > 64 {
-				username = username[:64]
+
+		if !collides {
+			// Each attempt gets its own savepoint (pgx implements a nested Begin as
+			// one). Without it the retry was unreachable: a duplicate-key error
+			// aborts the enclosing transaction, so the second CreateUser returned
+			// 25P02 in_failed_sql_transaction rather than 23505 and fell through to
+			// a generic internal error. Anyone who claimed a victim's email local
+			// part via public signup could permanently break their SSO onboarding,
+			// and two users with the same local part on different domains hit it by
+			// accident.
+			sp, err := tx.Begin(ctx)
+			if err != nil {
+				return db.User{}, "", errors.New("internal")
 			}
-			continue
+			created, createErr := h.q.WithTx(sp).CreateUser(ctx, db.CreateUserParams{
+				Username:     username,
+				Email:        email,
+				FirstName:    claims.GivenName,
+				LastName:     claims.FamilyName,
+				PasswordHash: pgtype.Text{Valid: false},
+			})
+			if createErr == nil {
+				if err := sp.Commit(ctx); err != nil {
+					return db.User{}, "", errors.New("internal")
+				}
+				user = created
+				break
+			}
+			_ = sp.Rollback(ctx)
+			var pgErr *pgconn.PgError
+			if !errors.As(createErr, &pgErr) || pgErr.Code != "23505" {
+				return db.User{}, "", errors.New("internal")
+			}
+			// A duplicate on the email column is not a name collision and no
+			// suffix will clear it. Retrying would burn all six attempts and then
+			// report a generic internal error.
+			if pgErr.ConstraintName != "" && strings.Contains(pgErr.ConstraintName, "email") {
+				return db.User{}, "", errors.New("email_taken")
+			}
 		}
-		return db.User{}, "", errors.New("internal")
+
+		suffix, err := randomB64(3)
+		if err != nil {
+			return db.User{}, "", errors.New("internal")
+		}
+		username = base + "-" + strings.ToLower(suffix)
+		if len(username) > 64 {
+			username = username[:64]
+		}
 	}
 	if user.ID == uuid.Nil {
-		return db.User{}, "", errors.New("internal")
+		return db.User{}, "", errors.New("username_unavailable")
 	}
 
 	allRole, err := qtx.GetRoleByName(ctx, "all")

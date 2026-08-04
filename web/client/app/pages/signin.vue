@@ -33,6 +33,9 @@ const ssoErrorMessages: Record<string, string> = {
   sso_no_id_token: "Provider did not return an id_token.",
   sso_claims: "Provider response was missing required claims.",
   sso_internal: "Something went wrong during SSO sign-in.",
+  sso_invalid_email: "Provider shared an email address torii cannot accept.",
+  sso_email_taken: "An account already uses that email address. Sign in with it, or ask an administrator to link the identity.",
+  sso_username_unavailable: "Could not allocate a username for this account. Ask an administrator to create it.",
 }
 
 onMounted(async () => {
@@ -57,17 +60,22 @@ async function onSubmit() {
   }
   loading.value = true
   try {
-    await signin(identifier.value.trim(), password.value)
-    const expected = useToriiUrl()
-    const route = useRoute()
     const to = safeRelativePath(route.query.to)
-    if (expected && window.location.host !== expected) {
-      // Service host: hard-load the original target (or "/") so the Go
-      // dispatch re-evaluates with the new cookies in place.
-      window.location.assign(to)
+    // return_to_host / handoff_cnf are put on this page's URL by the Go dispatch
+    // when it redirected an unauthenticated navigation on a proxied host here.
+    // Passing them back lets the server mint a single-use handoff token so the
+    // session materialises on that host — the sign-in form itself never leaves the
+    // control plane, so no upstream origin ever hosts it.
+    const handoffUrl = await signin(identifier.value.trim(), password.value, {
+      returnToHost: typeof route.query.return_to_host === "string" ? route.query.return_to_host : undefined,
+      handoffCnf: typeof route.query.handoff_cnf === "string" ? route.query.handoff_cnf : undefined,
+      returnTo: to,
+    })
+    if (handoffUrl) {
+      window.location.assign(handoffUrl)
       return
     }
-    await navigateTo("/dashboard")
+    await navigateTo(to !== "/" ? to : "/dashboard")
   } catch (err: unknown) {
     const e = err as { data?: { error?: string }; message?: string }
     error.value = e?.data?.error ?? e?.message ?? "Sign in failed"
@@ -77,7 +85,21 @@ async function onSubmit() {
 }
 
 function ssoSignin(slug: string) {
-  window.location.assign(`/_torii/api/v1/oauth/${slug}/start`)
+  // Forward the cross-host return leg the dispatch put on this page's URL. Since
+  // this page only ever renders on the control plane, oauthStart's own service-host
+  // bounce can't fire from here — without these the correlator dispatch already
+  // minted would be dropped and the user would land on the dashboard instead of
+  // back on the service they came from. The server ignores return_to_host unless
+  // handoff_cnf accompanies it, so they must travel together.
+  const params = new URLSearchParams()
+  const rh = route.query.return_to_host
+  const cnf = route.query.handoff_cnf
+  if (typeof rh === "string" && typeof cnf === "string" && rh && cnf) {
+    params.set("return_to_host", rh)
+    params.set("handoff_cnf", cnf)
+  }
+  const qs = params.toString()
+  window.location.assign(`/_torii/api/v1/oauth/${slug}/start${qs ? `?${qs}` : ""}`)
 }
 </script>
 

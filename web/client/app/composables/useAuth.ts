@@ -23,6 +23,20 @@ interface TokenResponse {
   access_token?: string
   expires_in: number
   user?: AuthUser
+  // Present when the caller signed in on the control plane after being
+  // redirected there from a proxied service host. Navigating to it materialises
+  // the session on that host via the single-use handoff token — the reason no
+  // password form is ever served on a service origin.
+  handoff_url?: string
+}
+
+// SigninOptions carries the cross-host return leg. All three come from the query
+// string the Go dispatch put on its redirect to the control plane; the server
+// refuses a returnToHost without a matching handoffCnf, so they travel together.
+export interface SigninOptions {
+  returnToHost?: string
+  handoffCnf?: string
+  returnTo?: string
 }
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null
@@ -83,6 +97,9 @@ export function useAuth() {
     password: string
     first_name?: string
     last_name?: string
+    // Required only while no account exists, to claim the first-user
+    // administrator grant. The server prints it to stderr at startup.
+    bootstrap_token?: string
   }) {
     const data = await $fetch<TokenResponse>("/_torii/api/v1/signup", {
       method: "POST",
@@ -92,13 +109,26 @@ export function useAuth() {
     apply(data)
   }
 
-  async function signin(identifier: string, password: string) {
+  // Returns the handoff URL when the server minted one, so the caller can leave
+  // for the service host instead of staying on the control plane.
+  async function signin(
+    identifier: string,
+    password: string,
+    opts: SigninOptions = {},
+  ): Promise<string | null> {
     const data = await $fetch<TokenResponse>("/_torii/api/v1/signin", {
       method: "POST",
-      body: { identifier, password },
+      body: {
+        identifier,
+        password,
+        return_to_host: opts.returnToHost,
+        handoff_cnf: opts.handoffCnf,
+        return_to: opts.returnTo,
+      },
       credentials: "include",
     })
     apply(data)
+    return data.handoff_url ?? null
   }
 
   async function refresh() {

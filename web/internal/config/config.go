@@ -18,6 +18,17 @@ type Config struct {
 	AuditLogDir            string
 	BlockLoopbackUpstreams bool
 	TrustedProxyCIDRs      []string
+	// BootstrapToken gates the zero-user administrator grant in signup. Set from
+	// TORII_BOOTSTRAP_TOKEN when the operator supplies one, otherwise generated at
+	// startup and written to stderr — see cmd/serve.go. Empty means no bootstrap
+	// is possible, which is the correct state once an account exists.
+	//
+	// Without it, the first anonymous caller to reach a freshly migrated
+	// deployment received the admin role and all 35 permissions: signup_enabled
+	// does not prevent it (the check short-circuits at count zero), and the
+	// documented production compose publishes the port on every interface while
+	// migrations run at container start.
+	BootstrapToken string
 }
 
 func Load() (*Config, error) {
@@ -77,6 +88,7 @@ func Load() (*Config, error) {
 	}
 
 	return &Config{
+		BootstrapToken:         os.Getenv("TORII_BOOTSTRAP_TOKEN"),
 		AppEnv:                 env,
 		JWTSecret:              []byte(secret),
 		AccessTokenTTL:         time.Duration(intEnv("ACCESS_TOKEN_EXPIRY_MINS", 1)) * time.Minute,

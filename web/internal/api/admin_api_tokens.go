@@ -223,6 +223,12 @@ func (h *authHandlers) resolveAPIToken(ctx context.Context, raw string) (*auth.C
 	if err != nil {
 		return nil, errors.New("api token owner missing")
 	}
+	// Same reason the lockout bites on token_refresh: a personal token resolves to
+	// the owner's live permissions and role ids, so honouring the lock only on the
+	// password path left a credential that walks through it.
+	if user.LockedUntil.Valid && time.Now().Before(user.LockedUntil.Time) {
+		return nil, errors.New("api token owner is locked out")
+	}
 	perms, err := h.q.GetUserPermissions(ctx, user.ID)
 	if err != nil {
 		return nil, err

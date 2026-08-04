@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"crypto/rand"
-	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -12,6 +11,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -437,31 +437,55 @@ func (h *authHandlers) adminRotateServiceSigningSecret(c *echo.Context) error {
 	})
 }
 
-// healthCheckClient is a singleton with a short timeout, no redirect
-// following, and TLS verification skipped. Skipping verification matches the
-// proxy path's behavior toward upstreams (operators legitimately point torii
-// at LAN services with self-signed certs); the goal here is reachability, not
-// trust.
-var healthCheckClient = &http.Client{
-	Timeout: 3 * time.Second,
-	Transport: &http.Transport{
-		TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
-		ResponseHeaderTimeout: 3 * time.Second,
-		DisableKeepAlives:     true,
-		// Socket-level backstop for the resolve-then-connect gap in the probe
-		// below: the address here is post-resolution. blockLoopback is false —
-		// the config-dependent part of the deny set stays with the pre-check,
-		// this only enforces the always-unsafe ranges.
-		DialContext: (&net.Dialer{
+var (
+	healthCheckOnce   sync.Once
+	healthCheckClient *http.Client
+)
+
+// healthProbeClient is the client behind GET /admin/services/:id/health: short
+// timeout, no redirect following, and TLS verified.
+//
+// Verification used to be disabled here, on the stated grounds that it matched
+// the proxy path. It did not: the proxy transport (proxy.ServiceCache
+// refreshLocked) never touches TLSClientConfig, so real proxied traffic to an
+// https upstream is verified, and this was the only InsecureSkipVerify in the
+// tree. The probe also forwards the per-service header overlay, which is
+// documented as the place upstream credentials live — so an on-path attacker
+// needing no torii permission at all could present any certificate and collect
+// them. A self-signed LAN upstream now fails the probe the same way it fails a
+// proxied request, which is the honest answer.
+//
+// blockLoopback is threaded from the config rather than hardcoded false, so the
+// socket-level backstop enforces the same deny set as the pre-check above it.
+func (h *authHandlers) healthProbeClient() *http.Client {
+	healthCheckOnce.Do(func() {
+		blockLoopback := h.cfg != nil && h.cfg.BlockLoopbackUpstreams
+		healthCheckClient = &http.Client{
 			Timeout: 3 * time.Second,
-			Control: func(network, address string, _ syscall.RawConn) error {
-				return netutil.IsSafeUpstreamAddr(address, false)
+			Transport: &http.Transport{
+				ResponseHeaderTimeout: 3 * time.Second,
+				DisableKeepAlives:     true,
+				// http.DefaultTransport carries Proxy: ProxyFromEnvironment. A
+				// HTTP_PROXY in the environment would route the probe through it
+				// and hand the deny set nothing to inspect but the proxy's own
+				// address, so this transport is built from scratch and never
+				// sets Proxy.
+				//
+				// Socket-level backstop for the resolve-then-connect gap in the
+				// probe below: the address here is post-resolution.
+				DialContext: (&net.Dialer{
+					Timeout: 3 * time.Second,
+					Control: func(network, address string, _ syscall.RawConn) error {
+						return netutil.IsSafeUpstreamAddr(address, blockLoopback)
+					},
+				}).DialContext,
 			},
-		}).DialContext,
-	},
-	CheckRedirect: func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
-	},
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+	})
+	return healthCheckClient
 }
 
 type serviceHealthResp struct {
@@ -511,17 +535,15 @@ func (h *authHandlers) adminCheckServiceHealth(c *echo.Context) error {
 	if svc.PreserveHost {
 		req.Host = svc.Domain
 	}
-	if len(svc.Headers) > 0 {
-		var overlay map[string]string
-		if err := json.Unmarshal(svc.Headers, &overlay); err == nil {
-			for k, v := range overlay {
-				req.Header.Set(k, v)
-			}
-		}
-	}
+	// The per-service header overlay is deliberately NOT replayed. It is
+	// documented as holding upstream credentials, and this probe is a
+	// reachability check — sending them buys nothing the status code doesn't
+	// already tell us, while giving every https misconfiguration and every
+	// on-path observer a copy. An upstream that 401s an unauthenticated GET
+	// still answers, which is what "reachable" means here.
 
 	start := time.Now()
-	resp, err := healthCheckClient.Do(req)
+	resp, err := h.healthProbeClient().Do(req)
 	latency := time.Since(start).Milliseconds()
 	if err != nil {
 		return c.JSON(http.StatusOK, serviceHealthResp{OK: false, LatencyMS: latency, Error: err.Error()})

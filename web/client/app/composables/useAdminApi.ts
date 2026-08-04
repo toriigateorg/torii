@@ -10,6 +10,20 @@ export interface UserListResponse extends PageMeta {
   items: AuthUser[]
 }
 
+// RoleMember is the reference view returned by GET /admin/roles/:id/users. That
+// endpoint is gated on roles.read alone, so it deliberately does not return the
+// member's permissions, sso_only or locked_until — listing the 'all' role would
+// otherwise hand over the whole directory with each account's authorization state.
+export interface RoleMember {
+  id: string
+  username: string
+  email: string
+}
+
+export interface RoleMemberListResponse extends PageMeta {
+  items: RoleMember[]
+}
+
 export interface CreateUserPayload {
   username: string
   email: string
@@ -399,7 +413,7 @@ export function useAdminApi() {
       })
     },
     listRoleUsers(id: string, page: number, pageSize = 20) {
-      return $fetch<UserListResponse>(`/_torii/api/v1/admin/roles/${id}/users`, {
+      return $fetch<RoleMemberListResponse>(`/_torii/api/v1/admin/roles/${id}/users`, {
         ...opts(),
         query: { page, page_size: pageSize },
       })

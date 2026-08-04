@@ -8,10 +8,14 @@ useSeoMeta({
 })
 
 const failed = ref(false)
+const route = useRoute()
 
 onMounted(async () => {
   const raw = window.location.hash.replace(/^#/, "")
   const token = new URLSearchParams(raw).get("token")
+  // Captured before the fragment is cleared. The query (not the fragment) carries
+  // where the user was originally headed on this host.
+  const to = safeRelativePath(route.query.to)
   // Clear the fragment before doing anything else: the token mints a session
   // on this host, and the page hard-navigates into the upstream next.
   history.replaceState(null, "", window.location.pathname)
@@ -30,11 +34,15 @@ onMounted(async () => {
     return
   }
   // Hard load so the Go dispatch re-evaluates with the new cookies in place.
-  window.location.assign("/")
+  window.location.assign(to)
 })
 
 function backToSignin() {
-  window.location.assign("/_torii/signin")
+  // Absolute: the sign-in page is served by the control plane only, so a relative
+  // path would 404 here.
+  const expected = useToriiUrl()
+  const scheme = window.location.protocol === "https:" ? "https" : "http"
+  window.location.assign(expected ? `${scheme}://${expected}/_torii/signin` : "/_torii/signin")
 }
 </script>
 

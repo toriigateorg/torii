@@ -1,12 +1,19 @@
 package auth
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
+	"net/http"
 	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/labstack/echo/v5"
 )
 
 const handoffTTL = 30 * time.Second
@@ -26,18 +33,99 @@ const handoffTTL = 30 * time.Second
 // bound to a specific target host so it can only be consumed at the destination
 // it was minted for, and carries a random jti that ConsumeHandoffJTI burns on
 // first use.
+//
+// Confirmation carries the SHA-256 of a correlator secret set as a host-scoped
+// cookie on the service host *before* the flow left it, and redemption requires
+// the cookie to hash to this value. Without it the token was a pure bearer
+// credential: nothing burns the jti at mint time, so an attacker driving the flow
+// headlessly received an unspent token in the Location header, never redeemed it,
+// and relayed the URL to a victim — whose browser then took a session for the
+// attacker's subject on a genuine service origin. The cookie is what makes the
+// token redeemable only by the browser that started the flow.
 type HandoffClaims struct {
-	TargetHost string `json:"target_host"`
-	TokenType  string `json:"typ"`
+	TargetHost   string `json:"target_host"`
+	TokenType    string `json:"typ"`
+	Confirmation string `json:"cnf"`
 	jwt.RegisteredClaims
 }
 
+// HandoffCorrelatorCookie holds the correlator secret. Host-scoped and
+// path-scoped to torii's own namespace, so it is never sent to an upstream.
+const HandoffCorrelatorCookie = "torii_handoff_cor"
+
+// HandoffCorrelatorTTL bounds how long a started handoff may be completed. It has
+// to outlast the interactive leg (a password entry or a full OIDC round trip),
+// not just the token's own 30 seconds.
+const HandoffCorrelatorTTL = 10 * time.Minute
+
+// NewHandoffCorrelator returns a fresh correlator secret and its digest. The
+// secret goes in the cookie on the service host; the digest travels through the
+// bounce and is embedded in the token.
+func NewHandoffCorrelator() (secret, digest string, err error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", "", err
+	}
+	secret = base64.RawURLEncoding.EncodeToString(b)
+	return secret, HandoffCorrelatorDigest(secret), nil
+}
+
+// HandoffCorrelatorDigest is the value embedded in the token's cnf claim.
+func HandoffCorrelatorDigest(secret string) string {
+	sum := sha256.Sum256([]byte(secret))
+	return hex.EncodeToString(sum[:])
+}
+
+// SetHandoffCorrelator writes the correlator cookie on the current host.
+func SetHandoffCorrelator(c *echo.Context, secret string, secure bool) {
+	c.SetCookie(&http.Cookie{
+		Name:     HandoffCorrelatorCookie,
+		Value:    secret,
+		Path:     "/_torii/",
+		Expires:  time.Now().Add(HandoffCorrelatorTTL),
+		MaxAge:   int(HandoffCorrelatorTTL.Seconds()),
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+// ClearHandoffCorrelator expires the correlator cookie. Called on redemption so a
+// correlator is good for exactly one handoff.
+func ClearHandoffCorrelator(c *echo.Context, secure bool) {
+	c.SetCookie(&http.Cookie{
+		Name:     HandoffCorrelatorCookie,
+		Value:    "",
+		Path:     "/_torii/",
+		Expires:  time.Unix(0, 0),
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+// VerifyHandoffCorrelator reports whether the presented cookie value matches the
+// digest the token was minted with. Both must be non-empty: an empty digest would
+// otherwise make an uncorrelated token verify against an absent cookie.
+func VerifyHandoffCorrelator(cookieValue, digest string) bool {
+	if cookieValue == "" || digest == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(HandoffCorrelatorDigest(cookieValue)), []byte(digest)) == 1
+}
+
 // IssueHandoffToken signs a short-lived JWT that authorizes targetHost's
-// /sso_handoff endpoint to mint a session for userID.
-func IssueHandoffToken(userID uuid.UUID, targetHost string, secret []byte) (string, error) {
+// /sso_handoff endpoint to mint a session for userID. correlatorDigest binds the
+// token to the browser that began the flow and is mandatory.
+func IssueHandoffToken(userID uuid.UUID, targetHost, correlatorDigest string, secret []byte) (string, error) {
+	if correlatorDigest == "" {
+		return "", errors.New("handoff token requires a correlator digest")
+	}
 	claims := HandoffClaims{
-		TargetHost: targetHost,
-		TokenType:  TokenTypeHandoff,
+		TargetHost:   targetHost,
+		TokenType:    TokenTypeHandoff,
+		Confirmation: correlatorDigest,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ID:        uuid.NewString(),
 			Subject:   userID.String(),
@@ -72,6 +160,9 @@ func ParseHandoffToken(token string, secret []byte) (*HandoffClaims, error) {
 	}
 	if claims.ID == "" {
 		return nil, errors.New("handoff token missing jti")
+	}
+	if claims.Confirmation == "" {
+		return nil, errors.New("handoff token missing correlator binding")
 	}
 	return claims, nil
 }

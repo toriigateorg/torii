@@ -14,10 +14,33 @@ import (
 // are skipped so the upstream's own header policy isn't clobbered — the
 // cookie-stripping in the proxy director is the load-bearing defense there.
 //
-// CSP is intentionally omitted here. The SPA and the upstream-injected
-// overlay both require inline-script support today; tightening that will be
-// done as a follow-up that also moves the overlay to an external script with
-// SRI so a strict default-src 'self' policy can be applied.
+// The CSP applies to torii's own pages only, for the same reason: a policy on a
+// proxied response would govern the upstream's document, not torii's.
+//
+// 'unsafe-inline' for script-src is unavoidable today — web.Handler splices an
+// inline <script> carrying window.__TORII_URL__ into every document, and the
+// upstream overlay is inline too. It is still worth emitting: the directives that
+// do bite are the ones that matter for the credential form. form-action 'self'
+// keeps a sign-in POST from being retargeted, frame-ancestors 'none' backs up
+// X-Frame-Options, and base-uri 'none' stops an injected <base> from re-pointing
+// every relative fetch the SPA makes. Moving the injection to a nonce is the
+// follow-up that lets 'unsafe-inline' go.
+// toriiCSP governs torii's own /_torii* responses.
+//
+// font-src and style-src admit fonts.googleapis.com / fonts.gstatic.com because
+// the shipped bundle loads a webfont from there. Self-hosting the font would let
+// both collapse to 'self' and is the better answer.
+const toriiCSP = "default-src 'self'; " +
+	"script-src 'self' 'unsafe-inline'; " +
+	"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+	"font-src 'self' data: https://fonts.gstatic.com; " +
+	"img-src 'self' data:; " +
+	"connect-src 'self'; " +
+	"form-action 'self'; " +
+	"frame-ancestors 'none'; " +
+	"base-uri 'none'; " +
+	"object-src 'none'"
+
 func securityHeaders(cfg *config.Config) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
@@ -28,6 +51,7 @@ func securityHeaders(cfg *config.Config) echo.MiddlewareFunc {
 			h := c.Response().Header()
 			h.Set("X-Content-Type-Options", "nosniff")
 			h.Set("X-Frame-Options", "DENY")
+			h.Set("Content-Security-Policy", toriiCSP)
 			// The handoff page carries a live session-minting token in its
 			// fragment. Fragments aren't sent in a Referer, but the page also
 			// hard-navigates into proxied upstream paths right after, so pin

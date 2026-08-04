@@ -8,7 +8,12 @@ services:
         TORII_VERSION: ${TORII_VERSION:-dev}
     image: codingcoffee/torii:latest
     ports:
-      - "1356:1356"
+      # Bound to loopback so a fronting TLS terminator is required rather than
+      # optional. Published on all interfaces, the gateway answered the public
+      # internet from the moment the container started — including during initial
+      # setup, before any account existed. Override to "1356:1356" only if
+      # something else already terminates TLS in front of this host.
+      - "127.0.0.1:1356:1356"
     depends_on:
       postgres:
         condition: service_healthy
@@ -20,7 +25,11 @@ services:
     volumes:
       - ./audit-logs:/app/logs
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:1356/api/v1/health"]
+      # Every route lives under /_torii/. The old /api/v1/health probe fell through
+      # dispatch to a JSON 404, so wget always exited non-zero and the container
+      # was permanently unhealthy — which made a genuinely dead gateway
+      # indistinguishable from the normal state.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:1356/_torii/api/v1/health"]
       interval: 30s
       timeout: 5s
       retries: 3

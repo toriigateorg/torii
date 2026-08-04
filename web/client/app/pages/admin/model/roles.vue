@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { Plus, Trash2, Pencil, Search, X } from "lucide-vue-next"
 import { watchDebounced } from "@vueuse/core"
-import type { AuthUser } from "~/composables/useAuth"
-import type { Role, Service, CreateRolePayload } from "~/composables/useAdminApi"
+import type { Role, Service, CreateRolePayload, RoleMember } from "~/composables/useAdminApi"
 
 definePageMeta({ middleware: ["auth", "admin"] })
 useSeoMeta({ title: "Admin · Roles — torii", robots: "noindex, nofollow" })
@@ -28,7 +27,7 @@ const newRole = ref<CreateRolePayload>({ name: "", description: "", permissions:
 const detailRole = ref<Role | null>(null)
 const detailPerms = ref<string[]>([])
 const detailServices = ref<Service[]>([])
-const detailMembers = ref<AuthUser[]>([])
+const detailMembers = ref<RoleMember[]>([])
 const detailLoading = ref(false)
 const detailError = ref<string | null>(null)
 const detailTab = ref<"permissions" | "services" | "members">("permissions")

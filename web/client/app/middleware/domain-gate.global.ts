@@ -5,12 +5,20 @@
 // dispatch already decided no service is bound here, so anything other than
 // those pages becomes a 404.
 
-// Pages the Go dispatch and the SSO callback legitimately land on when the
-// SPA is running on a service domain. /handoff is where the post-SSO redirect
-// arrives (unauthenticated — the token it carries is what mints the session),
-// and /forbidden is where dispatch sends an authenticated user whose roles
-// don't grant the service.
-const crossHostPages = new Set(["/signin", "/signup", "/handoff", "/forbidden"])
+// Pages the Go dispatch and the cross-host return leg legitimately land on when
+// the SPA is running on a service domain. /handoff is where that leg arrives
+// (unauthenticated — the token it carries is what mints the session), and
+// /forbidden is where dispatch sends an authenticated user whose roles don't
+// grant the service.
+//
+// /signin and /signup are deliberately absent, and must stay absent. Rendering
+// them here put torii's password form on the upstream application's origin,
+// same-origin with whatever script that upstream runs — and a captured password
+// has no host binding, so it replays on the control plane and on every other
+// service. Credential collection belongs to TORII_URL; dispatch redirects there
+// and the session comes back through /handoff. The server enforces this too (see
+// cmd/serve.go toriiPathAllowedOffHost); this is the client half.
+const crossHostPages = new Set(["/handoff", "/forbidden"])
 
 export default defineNuxtRouteMiddleware((to) => {
   if (import.meta.server) return
@@ -37,5 +45,8 @@ export default defineNuxtRouteMiddleware((to) => {
     })
   }
 
-  return navigateTo("/signin", { replace: true })
+  // Leave this origin entirely. navigateTo("/signin") would render the sign-in
+  // form right here, which is the thing this gate exists to prevent.
+  const scheme = window.location.protocol === "https:" ? "https" : "http"
+  window.location.replace(`${scheme}://${expected}/_torii/signin`)
 })

@@ -62,7 +62,11 @@ func Handler(toriiURL string) echo.HandlerFunc {
 
 func buildInjection(toriiURL string) []byte {
 	encoded, _ := json.Marshal(toriiURL)
-	return []byte("<script>window.__TORII_URL__=" + string(encoded) + "</script>")
+	// json.Marshal does not escape "<", so a TORII_URL containing "</script>"
+	// would close the element and everything after it would parse as markup.
+	// Operator-controlled, but escaping it costs nothing.
+	escaped := strings.NewReplacer("<", `<`, ">", `>`, "&", `&`).Replace(string(encoded))
+	return []byte("<script>window.__TORII_URL__=" + escaped + "</script>")
 }
 
 // htmlInjector buffers the upstream FileServer response so we can splice a

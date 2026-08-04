@@ -74,6 +74,16 @@ func (h *authHandlers) changeMyPassword(c *echo.Context) error {
 	return h.issueAndRespond(c, user)
 }
 
+// adminResetPasswordReq is deliberately separate from changePasswordReq rather
+// than reusing it: ConvertSSOOnly is meaningful only on the admin path, and
+// changeMyPassword must not acquire a field that lets a caller skip an invariant.
+type adminResetPasswordReq struct {
+	New string `json:"new"`
+	// ConvertSSOOnly must be set to write a password onto an account that has
+	// none. See adminResetUserPassword.
+	ConvertSSOOnly bool `json:"convert_sso_only"`
+}
+
 // adminResetUserPassword: admin reset, no current-password check, audit-logged.
 // Invalidates all of the target user's refresh tokens.
 func (h *authHandlers) adminResetUserPassword(c *echo.Context) error {
@@ -81,7 +91,7 @@ func (h *authHandlers) adminResetUserPassword(c *echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid id"})
 	}
-	var req changePasswordReq
+	var req adminResetPasswordReq
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
@@ -101,6 +111,22 @@ func (h *authHandlers) adminResetUserPassword(c *echo.Context) error {
 	if ok, err := h.guardOutranksTarget(c, id, user.Username, "reset the password of"); !ok {
 		return err
 	}
+	// An account with a null password_hash is sso_only: it authenticates purely
+	// through its identity provider, which is what puts it under that provider's
+	// MFA and deprovisioning. Writing a password here converted it to a local
+	// account, so disabling the user at the IdP no longer prevented sign-in — and
+	// the account reports sso_only false afterwards, so nothing outside the audit
+	// log showed it had happened. adminCreateUser and changeMyPassword both
+	// enforce this invariant; a reset is not the place to silently undo it.
+	converted := false
+	if !user.PasswordHash.Valid {
+		if !req.ConvertSSOOnly {
+			return c.JSON(http.StatusConflict, map[string]string{
+				"error": "this account has no password and authenticates via SSO; set convert_sso_only to give it one",
+			})
+		}
+		converted = true
+	}
 	hash, err := auth.HashPassword(req.New)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
@@ -117,6 +143,7 @@ func (h *authHandlers) adminResetUserPassword(c *echo.Context) error {
 		TargetType: audit.TargetUser,
 		TargetID:   &id,
 		TargetName: user.Username,
+		Metadata:   map[string]any{"converted_from_sso_only": converted},
 	})
 	return c.NoContent(http.StatusNoContent)
 }
@@ -162,6 +189,14 @@ func (h *authHandlers) adminRevokeUserSessions(c *echo.Context) error {
 // a lockout is waiting for the window to lapse without another failed attempt,
 // which an attacker can prevent indefinitely. If every admin is locked out at
 // once, `torii users unlock` is the offline equivalent.
+//
+// The privilege guard matters more here than the name suggests. The lockout is
+// the only per-account bound on password guessing — authLimiter keys on the
+// client IP (folded to /64 for v6) and is trivially distributed — so an unlock
+// against a higher-privileged target hands the caller an unbounded online
+// guessing oracle: nine wrong passwords, unlock, repeat. Of the three
+// users.update handlers this was the one left unguarded, which made it the only
+// surviving users.update operation against a target the caller does not outrank.
 func (h *authHandlers) adminUnlockUser(c *echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -171,6 +206,9 @@ func (h *authHandlers) adminUnlockUser(c *echo.Context) error {
 	user, err := h.q.GetUserByID(ctx, id)
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "user not found"})
+	}
+	if ok, err := h.guardOutranksTarget(c, id, user.Username, "unlock"); !ok {
+		return err
 	}
 	if err := h.q.ResetFailedLogin(ctx, id); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})

@@ -50,9 +50,10 @@ Set via environment (`.env` or `.app.env`):
 | `DATABASE_URL` | *(required)* | pgx connection string |
 | `TORII_URL` | *(required)* | host[:port] torii answers on; other hosts are reverse-proxied |
 | `API_HOST` / `API_PORT` | `0.0.0.0` / `1356` | |
-| `ACCESS_TOKEN_EXPIRY_MINS` | `5` | |
+| `ACCESS_TOKEN_EXPIRY_MINS` | `1` | Also bounds how long a revoked role or permission keeps working, since claims are snapshotted into the JWT. |
 | `REFRESH_TOKEN_EXPIRY_DAYS` | `7` | |
 | `AUDIT_LOG_DIR` | `./logs` | mount a volume here in prod |
+| `TORII_BOOTSTRAP_TOKEN` | *(generated)* | Required to create the first account, which is granted full admin. Leave unset and torii prints a one-time token to stderr at startup. |
 
 ## CLI
 

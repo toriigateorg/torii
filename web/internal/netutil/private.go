@@ -26,6 +26,8 @@ var ErrUnsafeAddress = errors.New("address resolves to an unsafe network range")
 //     through torii.
 //   - Multicast (224.0.0.0/4, ff00::/8) — not a valid unicast destination.
 //   - Unspecified (0.0.0.0, ::) — same.
+//   - Named credential-bearing metadata endpoints that match no IP predicate;
+//     see metadataAddrs.
 //
 // blockLoopback adds 127.0.0.0/8 and ::1 to the deny set. Off by default
 // because co-hosted sidecars on loopback are a normal deployment pattern;
@@ -89,6 +91,23 @@ var (
 	nat64WellKnownNet = mustCIDR("64:ff9b::/96")
 )
 
+// metadataAddrs are credential-bearing instance-metadata endpoints that fall
+// outside every net.IP predicate, so neither the link-local nor the private
+// checks reach them. Each has to be named.
+//
+// 100.100.100.200 is Alibaba Cloud's metadata service. It sits in CGNAT
+// (100.64.0.0/10, RFC 6598), which is neither link-local nor private as far as
+// Go is concerned, so it passed both the write-time and the dial-time guard and
+// served instance RAM role credentials to anyone who could point a service at
+// it.
+//
+// Deliberately excluded: Azure's WireServer (168.63.129.16) serves goal state
+// rather than credentials, and Oracle Classic's 192.0.0.192 is retired. Neither
+// is worth the false-positive risk of denying a real upstream.
+var metadataAddrs = map[string]string{
+	"100.100.100.200": "alibaba cloud metadata service",
+}
+
 func mustCIDR(s string) *net.IPNet {
 	_, n, err := net.ParseCIDR(s)
 	if err != nil {
@@ -109,6 +128,13 @@ func unsafeReason(ip net.IP, blockLoopback bool) string {
 		return "loopback"
 	case imdsIPv6Net.Contains(ip):
 		return "cloud metadata over IPv6"
+	}
+	// Keyed on the canonical string form so a v4-mapped v6 spelling
+	// (::ffff:100.100.100.200) resolves to the same entry.
+	if v4 := ip.To4(); v4 != nil {
+		if reason, denied := metadataAddrs[v4.String()]; denied {
+			return reason
+		}
 	}
 	// NAT64-embedded IPv4: re-run the deny set against the address the packet
 	// is actually translated to. Only for real v6 forms — To4 already handles
