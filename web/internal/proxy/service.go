@@ -470,8 +470,12 @@ func stripUpstreamAuthCookies(h http.Header) {
 // stripCookies rewrites the request's Cookie header to omit the named cookies.
 // If no cookies remain, the header is removed entirely.
 func stripCookies(req *http.Request, names ...string) {
-	raw := req.Header.Get("Cookie")
-	if raw == "" {
+	// Values, not Get: a client may send several Cookie headers, and Get returns
+	// only the first. An empty first header made this return before it looked at
+	// the rest, so every torii cookie in a second header reached the upstream.
+	raw := strings.Join(req.Header.Values("Cookie"), "; ")
+	if strings.TrimSpace(raw) == "" {
+		req.Header.Del("Cookie")
 		return
 	}
 	skip := make(map[string]struct{}, len(names))
@@ -489,6 +493,12 @@ func stripCookies(req *http.Request, names ...string) {
 		if eq := strings.IndexByte(trimmed, '='); eq >= 0 {
 			name = trimmed[:eq]
 		}
+		// net/http trims the name before matching, so "access_token =v" parses as
+		// access_token on the way in but did not match here on the way out. Only
+		// the credential's own owner could construct that header, so it was never
+		// an escalation — but the response-direction twin already trims and the
+		// asymmetry is just a trap for the next reader.
+		name = strings.TrimSpace(name)
 		if _, drop := skip[name]; drop {
 			continue
 		}

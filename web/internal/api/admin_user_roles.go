@@ -100,15 +100,6 @@ func (h *authHandlers) adminRevokeUserRole(c *echo.Context) error {
 	if role.IsSystem && role.Name == "all" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "cannot revoke the 'all' role"})
 	}
-	if role.IsSystem && role.Name == "admin" {
-		count, err := h.q.CountAdmins(ctx)
-		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
-		}
-		if count <= 1 {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "cannot revoke admin from the sole admin user"})
-		}
-	}
 	user, err := h.q.GetUserByID(ctx, userID)
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "user not found"})
@@ -128,7 +119,31 @@ func (h *authHandlers) adminRevokeUserRole(c *echo.Context) error {
 		h.logRoleGrantDenied(c, audit.TargetUser, userID, user.Username, role)
 		return c.JSON(http.StatusForbidden, map[string]string{"error": errCannotRevokeRole})
 	}
-	if err := h.q.RevokeUserRole(ctx, db.RevokeUserRoleParams{UserID: userID, RoleID: roleID}); err != nil {
+	// The last-admin check and the revoke share one transaction and the
+	// admin-guard advisory lock, so two concurrent revocations cannot each see a
+	// count of two and between them leave the deployment with no administrator.
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", adminGuardLock); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
+	qtx := h.q.WithTx(tx)
+	if role.IsSystem && role.Name == "admin" {
+		count, err := qtx.CountAdmins(ctx)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+		}
+		if count <= 1 {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "cannot revoke admin from the sole admin user"})
+		}
+	}
+	if err := qtx.RevokeUserRole(ctx, db.RevokeUserRoleParams{UserID: userID, RoleID: roleID}); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not revoke role"})
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not revoke role"})
 	}
 	uid := userID

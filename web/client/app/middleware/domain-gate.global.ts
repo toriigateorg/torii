@@ -49,4 +49,10 @@ export default defineNuxtRouteMiddleware((to) => {
   // form right here, which is the thing this gate exists to prevent.
   const scheme = window.location.protocol === "https:" ? "https" : "http"
   window.location.replace(`${scheme}://${expected}/_torii/signin`)
+
+  // location.replace only schedules the navigation; without aborting, the router
+  // completes this one first and paints the denied page — torii's genuine
+  // sign-in form, rendered on the upstream's origin — for however long the real
+  // navigation takes.
+  return abortNavigation()
 })

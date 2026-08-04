@@ -97,6 +97,16 @@ func (h *authHandlers) adminRevokeToken(c *echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "cannot revoke your own current session; use /logout"})
 	}
 
+	// Same ceiling as the PAT sibling in admin_api_tokens.go. Without it a
+	// tokens.delete holder can log out any administrator at will.
+	owner, err := h.q.GetUserByID(ctx, row.UserID)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "token not found"})
+	}
+	if ok, err := h.guardOutranksTarget(c, row.UserID, owner.Username, "revoke a session of"); !ok {
+		return err
+	}
+
 	if err := h.q.RevokeRefreshToken(ctx, id); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not revoke token"})
 	}

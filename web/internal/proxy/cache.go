@@ -172,6 +172,12 @@ func (c *ServiceCache) refreshLocked(ctx context.Context) {
 		// write-time check in validateServiceReq.
 		blockLoopback := c.blockLoopback
 		tr := http.DefaultTransport.(*http.Transport).Clone()
+		// The clone inherits ProxyFromEnvironment. With a proxy configured the
+		// dialer connects to the proxy, so the Control hook above would be
+		// inspecting the proxy's address and the SSRF deny set would be applied to
+		// the wrong host entirely — the real target travels as a CONNECT/absolute
+		// URI the hook never sees.
+		tr.Proxy = nil
 		tr.DialContext = (&net.Dialer{
 			Timeout:   time.Duration(r.DialTimeoutSecs) * time.Second,
 			KeepAlive: 30 * time.Second,

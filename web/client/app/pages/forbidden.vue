@@ -10,9 +10,19 @@ useSeoMeta({
 const route = useRoute()
 const { signout } = useAuth()
 
+// The query value is attacker-supplied — this page is served on the upstream's
+// origin and anyone can link to it with any ?service= — and it is rendered into
+// the page body. Vue escapes it, so it is text rather than markup, but text
+// under torii's branding on a host the visitor already trusts is still a
+// serviceable phishing surface. Clamp it to the shape a real service title has
+// and to a length that cannot carry a sentence.
+const serviceTitleRe = /^[\w .,'()&-]{1,64}$/
+
 const service = computed(() => {
   const s = route.query.service
-  return typeof s === "string" && s.trim() ? s.trim() : ""
+  if (typeof s !== "string") return ""
+  const trimmed = s.trim()
+  return serviceTitleRe.test(trimmed) ? trimmed : ""
 })
 
 const host = computed(() => (import.meta.client ? window.location.host : ""))

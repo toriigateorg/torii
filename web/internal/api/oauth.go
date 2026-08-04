@@ -31,14 +31,11 @@ import (
 	"torii/internal/netutil"
 )
 
-const (
-	ssoStateCookie      = "sso_state"
-	ssoNonceCookie      = "sso_nonce"
-	ssoReturnHostCookie = "sso_return_host"
-	ssoHandoffCnfCookie = "sso_handoff_cnf"
-	ssoCookiePath       = "/_torii/api/v1/oauth/"
-	ssoCookieTTL        = 10 * time.Minute
-)
+// The SSO temp cookie names live in package auth alongside the session cookies:
+// they are decided at startup by auth.UseHostPrefixedCookies and must appear in
+// auth.ToriiCookieNames so the proxy strips them. Read at call time, never
+// snapshotted.
+const ssoCookieTTL = 10 * time.Minute
 
 type cachedOIDCProvider struct {
 	updatedAt time.Time
@@ -98,6 +95,10 @@ func (h *authHandlers) oidcHTTPClient() *http.Client {
 		blockLoopback := h.cfg.BlockLoopbackUpstreams
 		tr := http.DefaultTransport.(*http.Transport).Clone()
 		tr.MaxResponseHeaderBytes = 64 << 10
+		// The clone inherits ProxyFromEnvironment, which would have the Control
+		// hook below validate the proxy's address instead of the IdP's — the
+		// deny set applied to the wrong host. healthProbeClient already does this.
+		tr.Proxy = nil
 		tr.DialContext = (&net.Dialer{
 			Timeout:   10 * time.Second,
 			KeepAlive: 30 * time.Second,
@@ -221,7 +222,7 @@ func (h *authHandlers) setSSOTempCookie(c *echo.Context, name, value string) {
 	c.SetCookie(&http.Cookie{
 		Name:     name,
 		Value:    value,
-		Path:     ssoCookiePath,
+		Path:     auth.SSOCookiePath(),
 		Expires:  time.Now().Add(ssoCookieTTL),
 		MaxAge:   int(ssoCookieTTL.Seconds()),
 		HttpOnly: true,
@@ -245,7 +246,7 @@ func (h *authHandlers) clearSSOTempCookie(c *echo.Context, name string) {
 	c.SetCookie(&http.Cookie{
 		Name:     name,
 		Value:    "",
-		Path:     ssoCookiePath,
+		Path:     auth.SSOCookiePath(),
 		Expires:  time.Unix(0, 0),
 		MaxAge:   -1,
 		HttpOnly: true,
@@ -302,11 +303,11 @@ func (h *authHandlers) oauthStart(c *echo.Context) error {
 	rh := c.QueryParam("return_to_host")
 	cnf := c.QueryParam("handoff_cnf")
 	if rh != "" && cnf != "" && h.isKnownServiceHost(ctx, rh) {
-		h.setSSOTempCookie(c, ssoReturnHostCookie, rh)
-		h.setSSOTempCookie(c, ssoHandoffCnfCookie, cnf)
+		h.setSSOTempCookie(c, auth.SSOReturnHostCookie, rh)
+		h.setSSOTempCookie(c, auth.SSOHandoffCnfCookie, cnf)
 	} else {
-		h.clearSSOTempCookie(c, ssoReturnHostCookie)
-		h.clearSSOTempCookie(c, ssoHandoffCnfCookie)
+		h.clearSSOTempCookie(c, auth.SSOReturnHostCookie)
+		h.clearSSOTempCookie(c, auth.SSOHandoffCnfCookie)
 	}
 
 	p, err := h.q.GetSSOProviderBySlug(ctx, slug)
@@ -325,8 +326,8 @@ func (h *authHandlers) oauthStart(c *echo.Context) error {
 	if err != nil {
 		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_internal")
 	}
-	h.setSSOTempCookie(c, ssoStateCookie, state)
-	h.setSSOTempCookie(c, ssoNonceCookie, nonce)
+	h.setSSOTempCookie(c, auth.SSOStateCookie, state)
+	h.setSSOTempCookie(c, auth.SSONonceCookie, nonce)
 
 	cfg := h.oauth2Config(c, prov, p)
 	return c.Redirect(http.StatusFound, cfg.AuthCodeURL(state, oidc.Nonce(nonce)))
@@ -367,8 +368,8 @@ func (h *authHandlers) oauthCallback(c *echo.Context) error {
 	slug := c.Param("slug")
 	ctx := c.Request().Context()
 
-	stateCookie, err := c.Cookie(ssoStateCookie)
-	h.clearSSOTempCookie(c, ssoStateCookie)
+	stateCookie, err := c.Cookie(auth.SSOStateCookie)
+	h.clearSSOTempCookie(c, auth.SSOStateCookie)
 	if err != nil || stateCookie.Value == "" {
 		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_state")
 	}
@@ -379,8 +380,8 @@ func (h *authHandlers) oauthCallback(c *echo.Context) error {
 	if subtle.ConstantTimeCompare([]byte(stateCookie.Value), []byte(c.QueryParam("state"))) != 1 {
 		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_state")
 	}
-	nonceCookie, err := c.Cookie(ssoNonceCookie)
-	h.clearSSOTempCookie(c, ssoNonceCookie)
+	nonceCookie, err := c.Cookie(auth.SSONonceCookie)
+	h.clearSSOTempCookie(c, auth.SSONonceCookie)
 	if err != nil || nonceCookie.Value == "" {
 		return c.Redirect(http.StatusFound, "/_torii/signin?error=sso_state")
 	}
@@ -490,10 +491,10 @@ func (h *authHandlers) oauthCallback(c *echo.Context) error {
 	// The handoff SPA page on the service host reads it out of the hash and
 	// POSTs it to /sso_handoff. Carrying it in the query would leak the live
 	// token to the upstream via the Referer of the post-handoff navigation.
-	rhCookie, rhErr := c.Cookie(ssoReturnHostCookie)
-	cnfCookie, cnfErr := c.Cookie(ssoHandoffCnfCookie)
-	h.clearSSOTempCookie(c, ssoReturnHostCookie)
-	h.clearSSOTempCookie(c, ssoHandoffCnfCookie)
+	rhCookie, rhErr := c.Cookie(auth.SSOReturnHostCookie)
+	cnfCookie, cnfErr := c.Cookie(auth.SSOHandoffCnfCookie)
+	h.clearSSOTempCookie(c, auth.SSOReturnHostCookie)
+	h.clearSSOTempCookie(c, auth.SSOHandoffCnfCookie)
 	if rhErr == nil && cnfErr == nil && rhCookie.Value != "" && cnfCookie.Value != "" {
 		if h.isKnownServiceHost(ctx, rhCookie.Value) {
 			tok, err := auth.IssueHandoffToken(user.ID, rhCookie.Value, cnfCookie.Value, h.cfg.JWTSecret)

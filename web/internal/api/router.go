@@ -94,7 +94,18 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	// it's governed per-service via Service.MaxBodySize in the proxy path.
 	v1 := e.Group("/_torii/api/v1", middleware.BodyLimit(1<<20), controlPlaneHostGate(cfg))
 
+	// Both health endpoints answer on every proxied host, which is where any
+	// anonymous visitor to any upstream can reach them. The detail below is for
+	// the operator, so off the control plane they collapse to a bare liveness
+	// signal: the build version tells an attacker which advisories apply, and the
+	// audit-sink counters tell them whether the trail they are about to generate
+	// is being recorded.
+	offHost := func(c *echo.Context) bool { return cfg == nil || !cfg.IsToriiHost(c.Request().Host) }
+
 	v1.GET("/health", func(c *echo.Context) error {
+		if offHost(c) {
+			return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+		}
 		return c.JSON(http.StatusOK, map[string]string{
 			"status":  "ok",
 			"version": version.Version,
@@ -109,6 +120,12 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 			if err := pool.Ping(ctx); err == nil {
 				dbOK = true
 			}
+		}
+		if offHost(c) {
+			if !dbOK {
+				return c.JSON(http.StatusServiceUnavailable, map[string]bool{"all": false})
+			}
+			return c.JSON(http.StatusOK, map[string]bool{"all": true})
 		}
 		// Audit state is reported so a disabled file sink is observable here
 		// rather than being discovered by someone looking for a trail that was

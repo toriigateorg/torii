@@ -33,6 +33,12 @@ import (
 	"torii/internal/web"
 )
 
+// maxHostHeaderLen bounds the Host header. A DNS name is at most 253 bytes and a
+// port at most 6 more; the slack is for punycode oddities and a trailing dot.
+// net/http itself imposes no per-line cap, so without this an unauthenticated
+// request could carry a ~1 MiB Host into code that derives values from it.
+const maxHostHeaderLen = 300
+
 func Serve() *cli.Command {
 	return &cli.Command{
 		Name:  "serve",
@@ -181,6 +187,23 @@ func runInner(ctx context.Context, host string, port int) error {
 		defaultReadTimeout  = 30 * time.Second
 		defaultWriteTimeout = 60 * time.Second
 	)
+	// Recover first so a panic anywhere below it becomes a 500 rather than
+	// tearing down the connection (and, on a hijacked one, the goroutine).
+	e.Use(middleware.Recover())
+	// net/http accepts a Host header up to MaxHeaderBytes with no per-line cap,
+	// and Host reaches unauthenticated code paths (cookie clearing, host
+	// canonicalisation, the service-cache lookup) before anything validates it.
+	// A real Host is a DNS name plus an optional port; refuse anything that
+	// cannot be one rather than making every downstream consumer defend itself.
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			if len(c.Request().Host) > maxHostHeaderLen {
+				return c.NoContent(http.StatusBadRequest)
+			}
+			proxy.WarnOnMisconfiguredTrust(c.Request())
+			return next(c)
+		}
+	})
 	e.Use(middleware.RequestLogger())
 	// Server-level ReadTimeout/WriteTimeout are disabled below so they can be
 	// set per-request (and overridden per-service in the proxy dispatch). This

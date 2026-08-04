@@ -212,26 +212,32 @@ func (h *authHandlers) signup(c *echo.Context) error {
 
 	ctx := c.Request().Context()
 
-	// Both directions of the machine/human namespace have to be closed, or the
-	// api_users check is just a race: create the service credential first, then
-	// register the human account that shadows it.
-	if _, err := h.q.GetAPIUserByName(ctx, req.Username); err == nil {
-		signupFail("conflict_api_user")
-		return c.JSON(http.StatusConflict, map[string]string{"error": "username already taken"})
-	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
-	}
-
 	// Bail out on a closed signup endpoint *before* the argon2 derivation, not
 	// after. Hashing first hands an anonymous caller a 64 MiB allocation per
 	// request on a route that is meant to be shut. The authoritative check is
 	// the one below, inside the transaction that serializes against first-user
 	// signup; this is only an early-out, so a stale read here costs nothing.
+	//
+	// It runs before the api_users lookup, not after. The other way round, a
+	// closed endpoint still answered 409 for a name held by a service credential
+	// and 403 for every other name, so anonymous callers could enumerate the
+	// machine-identity namespace on a route that is supposed to be shut.
 	if !h.getBoolSetting(ctx, settingSignupEnabled, true) {
 		if count, err := h.q.CountUsers(ctx); err == nil && count > 0 {
 			signupFail("signup_disabled")
 			return c.JSON(http.StatusForbidden, map[string]string{"error": "new account signups are disabled"})
 		}
+	}
+
+	// Both directions of the machine/human namespace have to be closed, or the
+	// api_users check is just a race: create the service credential first, then
+	// register the human account that shadows it. The response is identical to
+	// the human-collision one below so it does not say which namespace matched.
+	if _, err := h.q.GetAPIUserByName(ctx, req.Username); err == nil {
+		signupFail("conflict_api_user")
+		return c.JSON(http.StatusConflict, map[string]string{"error": "username already taken"})
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	}
 
 	hash, err := auth.HashPassword(req.Password)
@@ -359,6 +365,13 @@ func (h *authHandlers) signin(c *echo.Context) error {
 	req.Identifier = strings.TrimSpace(req.Identifier)
 	if req.Identifier == "" || req.Password == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "identifier and password required"})
+	}
+	// Per-account fail-safe, checked before the argon2 derivation. authLimiter is
+	// per-IP and therefore worth nothing when torii's view of the client address
+	// is a single upstream hop, which is the default under any reverse proxy that
+	// is not in TRUSTED_PROXY_CIDRS.
+	if !allowIdentifierAttempt(req.Identifier) {
+		return c.JSON(http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
 	}
 
 	signinFail := func(reason string, uid *uuid.UUID, username string) {
@@ -680,6 +693,21 @@ func (h *authHandlers) refreshAndRedirect(c *echo.Context) error {
 //
 // Control-plane only: absent from crossHostEndpoints, so it 404s on a service host.
 func (h *authHandlers) handoffStart(c *echo.Context) error {
+	// The only legitimate way to arrive here is dispatch's 302 from a service
+	// host, i.e. a top-level document navigation. Script on a service host can
+	// otherwise drive the whole flow itself — mint a correlator it controls, call
+	// this, and harvest the resulting handoff token out of the fragment — turning
+	// ephemeral XSS into a durable session for that host that survives outside
+	// the browser. Requiring a navigation does not stop a determined attacker
+	// from opening a window, but it does close the silent fetch()/XHR path, and
+	// browsers that do not send Sec-Fetch-* are not the ones running the script.
+	if dest := c.Request().Header.Get("Sec-Fetch-Dest"); dest != "" && dest != "document" {
+		return c.NoContent(http.StatusForbidden)
+	}
+	if mode := c.Request().Header.Get("Sec-Fetch-Mode"); mode != "" && mode != "navigate" {
+		return c.NoContent(http.StatusForbidden)
+	}
+
 	rh := c.QueryParam("return_to_host")
 	cnf := c.QueryParam("handoff_cnf")
 	to := safeRelativeRedirect(c.QueryParam("to"))

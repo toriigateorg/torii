@@ -28,42 +28,65 @@ var (
 	AccessCookie  = legacyAccessCookie
 	RefreshCookie = legacyRefreshCookie
 	// SessionCookie is a non-secret marker cookie at Path=/ that lives as long
-	// as the refresh token. The refresh cookie itself is scoped to
-	// /_torii/api/v1/ so it doesn't leak to upstream services on proxied
-	// hosts; dispatch uses this marker's presence on service paths to decide
-	// whether to bounce a navigation through /_torii/api/v1/refresh_and_redirect
-	// or to the control plane.
+	// as the refresh token. In dev the refresh cookie is scoped to
+	// /_torii/api/v1/, so dispatch uses this marker's presence on service paths
+	// to decide whether to bounce a navigation through
+	// /_torii/api/v1/refresh_and_redirect or to the control plane.
 	SessionCookie = legacySessionCookie
+
+	// The four SSO temp cookies. They live for ten minutes across the IdP
+	// round-trip and carry the CSRF state, the OIDC nonce, and the cross-host
+	// return binding — a sibling host able to plant its own state/nonce pair
+	// (with a real authorization code for its own IdP account) logs the victim
+	// into the attacker's account, so they need the same __Host- treatment and
+	// the same proxy stripping as the session cookies.
+	SSOStateCookie      = legacySSOStateCookie
+	SSONonceCookie      = legacySSONonceCookie
+	SSOReturnHostCookie = legacySSOReturnHostCookie
+	SSOHandoffCnfCookie = legacySSOHandoffCnfCookie
 )
 
 // The pre-prefix names. Kept so ClearAuthCookies can expire cookies a browser is
 // still holding from before an upgrade — otherwise they linger forever, since the
 // server would only ever clear the prefixed names.
 const (
-	legacyAccessCookie    = "access_token"
-	legacyRefreshCookie   = "refresh_token"
-	legacySessionCookie   = "torii_session"
-	legacyCorrelatorCooky = "torii_handoff_cor"
+	legacyAccessCookie        = "access_token"
+	legacyRefreshCookie       = "refresh_token"
+	legacySessionCookie       = "torii_session"
+	legacyCorrelatorCooky     = "torii_handoff_cor"
+	legacySSOStateCookie      = "sso_state"
+	legacySSONonceCookie      = "sso_nonce"
+	legacySSOReturnHostCookie = "sso_return_host"
+	legacySSOHandoffCnfCookie = "sso_handoff_cnf"
 )
 
-const (
-	// accessCookiePath stays "/" so the cookie rides along on requests to
-	// proxied service paths, letting dispatch authenticate the user via the
-	// cookie alone. proxy/service.go strips the cookie before forwarding so
-	// it never reaches the upstream — the host is the trust boundary.
-	// __Host- also mandates it.
-	accessCookiePath = "/"
-	// refreshCookiePath narrows the refresh cookie even further so it only
-	// rides along on the auth endpoints that consume it. dispatch's 302 to
-	// /_torii/api/v1/refresh_and_redirect is what makes cross-host refresh
-	// work despite this tight scope.
-	//
-	// This is why the refresh cookie is the one cookie that cannot carry __Host-,
-	// which mandates Path=/. Narrow scope was judged the better trade: it keeps
-	// the cookie away from upstreams entirely. Its forgery is instead defeated
-	// server-side by the host column on refresh_tokens (migration 0017), which
-	// holds regardless of browser cookie semantics.
-	refreshCookiePath = "/_torii/api/v1/"
+// accessCookiePath stays "/" so the cookie rides along on requests to proxied
+// service paths, letting dispatch authenticate the user via the cookie alone.
+// proxy/service.go strips the cookie before forwarding so it never reaches the
+// upstream — the host is the trust boundary. __Host- also mandates it.
+const accessCookiePath = "/"
+
+// legacyRefreshCookiePath is the narrow scope the refresh cookie used before it
+// carried __Host-. Still cleared under that path so a browser holding one from
+// before the upgrade, or a plant plausibly made there, is expired rather than
+// left to shadow the real cookie forever.
+const legacyRefreshCookiePath = "/_torii/api/v1/"
+
+// legacySSOCookiePath is the pre-prefix scope of the SSO temp cookies.
+const legacySSOCookiePath = "/_torii/api/v1/oauth/"
+
+// refreshCookiePath / ssoCookiePath are vars because __Host- mandates Path=/.
+// Narrow scope was originally judged the better trade (it keeps the cookie away
+// from upstreams entirely), but the proxy strips every name in ToriiCookieNames
+// from forwarded requests anyway, so the scope bought nothing the strip did not
+// already buy — while costing the prefix, and with it the only defence against a
+// sibling host planting the cookie under a *different* path. Per RFC 6265 §5.4 a
+// longer path sorts first, so a plant won (*http.Request).Cookie's first match,
+// and no clearing path could remove it. refresh_tokens.host does not help: it
+// records which host minted a token, not whose browser holds it.
+var (
+	refreshCookiePath = legacyRefreshCookiePath
+	ssoCookiePath     = legacySSOCookiePath
 )
 
 // UseHostPrefixedCookies switches every cookie torii sets to its __Host- prefixed
@@ -72,10 +95,22 @@ const (
 // would lock every user out. cmd/serve.go calls it when cfg.IsProd().
 func UseHostPrefixedCookies() {
 	AccessCookie = "__Host-" + legacyAccessCookie
+	RefreshCookie = "__Host-" + legacyRefreshCookie
 	SessionCookie = "__Host-" + legacySessionCookie
 	HandoffCorrelatorCookie = "__Host-" + legacyCorrelatorCooky
-	// RefreshCookie deliberately keeps its plain name; see refreshCookiePath.
+	SSOStateCookie = "__Host-" + legacySSOStateCookie
+	SSONonceCookie = "__Host-" + legacySSONonceCookie
+	SSOReturnHostCookie = "__Host-" + legacySSOReturnHostCookie
+	SSOHandoffCnfCookie = "__Host-" + legacySSOHandoffCnfCookie
+	// __Host- mandates Path=/ for every one of them.
+	refreshCookiePath = "/"
+	ssoCookiePath = "/"
 }
+
+// SSOCookiePath exposes the current SSO temp-cookie scope to package api, which
+// sets and clears them. Read at call time, never snapshotted — the value is
+// decided at startup by UseHostPrefixedCookies.
+func SSOCookiePath() string { return ssoCookiePath }
 
 // ToriiCookieNames returns every cookie name torii owns under the *current*
 // naming, plus the legacy spellings. The proxy uses it to strip them from
@@ -87,7 +122,9 @@ func UseHostPrefixedCookies() {
 func ToriiCookieNames() []string {
 	return []string{
 		AccessCookie, RefreshCookie, SessionCookie, HandoffCorrelatorCookie,
+		SSOStateCookie, SSONonceCookie, SSOReturnHostCookie, SSOHandoffCnfCookie,
 		legacyAccessCookie, legacyRefreshCookie, legacySessionCookie, legacyCorrelatorCooky,
+		legacySSOStateCookie, legacySSONonceCookie, legacySSOReturnHostCookie, legacySSOHandoffCnfCookie,
 	}
 }
 
@@ -152,8 +189,14 @@ func ClearAuthCookies(c *echo.Context, secure bool) {
 		{RefreshCookie, refreshCookiePath},
 		{SessionCookie, "/"},
 		{legacyAccessCookie, accessCookiePath},
-		{legacyRefreshCookie, refreshCookiePath},
 		{legacySessionCookie, "/"},
+		// Both refresh scopes: "/" catches the __Host- cookie and anything a
+		// sibling host planted at the root, the narrow path catches a cookie a
+		// browser still holds from before the prefix upgrade. Clearing only one
+		// of them left the other to shadow the real cookie on every request,
+		// which is an unremovable logout.
+		{legacyRefreshCookie, "/"},
+		{legacyRefreshCookie, legacyRefreshCookiePath},
 	}
 	for _, s := range specs {
 		expireCookie(c, s.name, s.path, "", secure)
@@ -162,7 +205,8 @@ func ClearAuthCookies(c *echo.Context, secure bool) {
 	// exist domain-scoped and only they are worth expiring this way.
 	for _, domain := range parentDomains(c.Request().Host) {
 		expireCookie(c, legacyAccessCookie, accessCookiePath, domain, secure)
-		expireCookie(c, legacyRefreshCookie, refreshCookiePath, domain, secure)
+		expireCookie(c, legacyRefreshCookie, "/", domain, secure)
+		expireCookie(c, legacyRefreshCookie, legacyRefreshCookiePath, domain, secure)
 		expireCookie(c, legacySessionCookie, "/", domain, secure)
 	}
 }
@@ -189,15 +233,35 @@ func expireCookie(c *echo.Context, name, path, domain string, secure bool) {
 // multi-label TLD it can over-generate (foo.co.uk yields co.uk). That is harmless:
 // the browser applies the PSL itself and ignores a Set-Cookie for a public suffix.
 // Erring toward one ignored header beats failing to clear a real planted cookie.
+//
+// The length gate is load-bearing, not tidiness. This runs on the attacker's raw
+// Host header — ClearAuthCookies is reached from the unauthenticated
+// /token_refresh before any host validation — and building every suffix of an
+// L-byte host costs O(L²) live bytes. net/http accepts a Host up to
+// MaxHeaderBytes (1 MiB here), which without the gate is ~275 GB of allocation
+// from one request, and a Go OOM is a fatal runtime error that takes the whole
+// gateway with it. Anything past the DNS/cookie-domain limits is discarded by
+// the browser anyway, so refusing it outright costs nothing real.
+const (
+	maxCookieHostLen    = 255
+	maxCookieHostLabels = 24
+)
+
 func parentDomains(host string) []string {
+	if len(host) > maxCookieHostLen+8 { // room for a ":65535" port
+		return nil
+	}
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
 	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
-	if host == "" || net.ParseIP(host) != nil {
+	if host == "" || len(host) > maxCookieHostLen || net.ParseIP(host) != nil {
 		return nil
 	}
 	labels := strings.Split(host, ".")
+	if len(labels) > maxCookieHostLabels {
+		return nil
+	}
 	var out []string
 	for i := 1; len(labels)-i >= 2; i++ {
 		out = append(out, strings.Join(labels[i:], "."))

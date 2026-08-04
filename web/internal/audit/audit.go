@@ -24,6 +24,10 @@ import (
 const (
 	ProxyAccessDebounce = 5 * time.Minute
 
+	// auditInsertTimeout bounds the detached audit insert. Without a deadline of
+	// its own, dropping the caller's cancellation would leave the write with none.
+	auditInsertTimeout = 5 * time.Second
+
 	TargetUser        = "user"
 	TargetRole        = "role"
 	TargetService     = "service"
@@ -272,7 +276,15 @@ func (l *Logger) Log(ctx context.Context, e Event) error {
 
 	var dbErr error
 	if l.q != nil {
-		_, dbErr = l.q.InsertAuditLog(ctx, db.InsertAuditLogParams{
+		// Detached from the caller's cancellation. The debounce that fronts the
+		// proxy access/deny paths only arms once this insert succeeds, so with the
+		// request's own context an attacker could abort the connection mid-insert,
+		// fail the write, leave the debounce unarmed, and repeat — every attempt
+		// still reaching the file sink, which rotates the on-disk history away in
+		// minutes. The record describes something that already happened; the
+		// client hanging up is not a reason to stop persisting it.
+		insertCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), auditInsertTimeout)
+		_, dbErr = l.q.InsertAuditLog(insertCtx, db.InsertAuditLogParams{
 			EventType:     e.EventType,
 			ActorUserID:   actorID,
 			ActorUsername: e.ActorUsername,
@@ -283,6 +295,7 @@ func (l *Logger) Log(ctx context.Context, e Event) error {
 			UserAgent:     e.UserAgent,
 			Metadata:      metaBytes,
 		})
+		cancel()
 		if dbErr != nil {
 			l.dbFailures.Add(1)
 			fmt.Fprintln(os.Stderr, "[audit] db insert failed:", dbErr)

@@ -22,8 +22,25 @@ services:
     environment:
       APP_ENV: production
       AUDIT_LOG_DIR: /app/logs
+      # The port above is published on the host's loopback, but the container
+      # never sees 127.0.0.1 as the peer: Docker re-originates host traffic from
+      # this network's gateway. Without that gateway in the trust set, torii
+      # ignores the X-Forwarded-For your TLS terminator sends and attributes
+      # every client to the one gateway address — which collapses every per-IP
+      # rate limiter into a single shared bucket (a couple of requests a second
+      # from anywhere then starves signin for everyone) and flattens every audit
+      # source IP to the same value.
+      #
+      # 172.16.0.0/12 is the default Docker bridge pool. Narrow it to this
+      # deployment's actual gateway if you know it, and understand that anything
+      # able to reach torii from inside that range can spoof its own client IP.
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-172.16.0.0/12}
     volumes:
       - ./audit-logs:/app/logs
+    # A Go OOM is a fatal runtime error that takes the whole gateway down, and
+    # restart: unless-stopped will happily loop it. Cap the container so one
+    # pathological request cannot take the host with it.
+    mem_limit: 1g
     healthcheck:
       # Every route lives under /_torii/. The old /api/v1/health probe fell through
       # dispatch to a JSON 404, so wget always exited non-zero and the container

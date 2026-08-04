@@ -181,7 +181,11 @@ func renderUpstreamError(w http.ResponseWriter, r *http.Request, status int) {
 // The original status code is preserved so callers still see the upstream's
 // signal. No upstream details are leaked into the rendered body.
 func replaceWithUpstreamError(resp *http.Response) error {
-	_, _ = io.Copy(io.Discard, resp.Body)
+	// Bounded like the inject path: the body is being thrown away, but a hostile
+	// upstream answering 5xx with an endless stream would otherwise hold the
+	// goroutine and the connection for as long as it cared to, and a service
+	// configured with read_timeout_secs=0 has no deadline to cut it off.
+	_, _ = io.CopyN(io.Discard, resp.Body, maxInjectBodyBytes)
 	_ = resp.Body.Close()
 
 	label, title, blurb := errorCopy(resp.StatusCode)

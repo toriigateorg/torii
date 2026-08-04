@@ -75,16 +75,28 @@ func Load() (*Config, error) {
 	// Comma-separated CIDR list of reverse proxies whose X-Forwarded-For
 	// values may be trusted. Without this, Echo's RealIP extractor honors
 	// XFF from any caller — meaning a public client can spoof their IP in
-	// audit logs and rate-limit keys. Default trusts loopback (the common
-	// "torii behind nginx on the same host" setup).
-	trustedCIDRs := []string{"127.0.0.1/32", "::1/128"}
-	if v := os.Getenv("TRUSTED_PROXY_CIDRS"); v != "" {
-		trustedCIDRs = nil
-		for _, p := range strings.Split(v, ",") {
-			if p = strings.TrimSpace(p); p != "" {
-				trustedCIDRs = append(trustedCIDRs, p)
-			}
+	// audit logs and rate-limit keys.
+	//
+	// There is deliberately no default. The old default of {127.0.0.1/32,
+	// ::1/128} looked like a safe "torii behind nginx on the same host"
+	// convenience but could never match under the documented compose
+	// deployment: a container does not see 127.0.0.1 as the peer of a
+	// host-originated connection, Docker re-originates it from the bridge
+	// gateway. It therefore trusted nothing while reading as if it trusted
+	// something, so RealIP() returned one constant address for every client and
+	// every per-IP rate limiter collapsed into a single shared bucket — an
+	// unauthenticated caller could starve signin and every refresh path for
+	// everyone at a couple of requests a second. An unset value now warns loudly
+	// at startup instead of pretending to be configured.
+	var trustedCIDRs []string
+	for _, p := range strings.Split(os.Getenv("TRUSTED_PROXY_CIDRS"), ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			trustedCIDRs = append(trustedCIDRs, p)
 		}
+	}
+	if len(trustedCIDRs) == 0 {
+		fmt.Fprintln(os.Stderr, "[config] WARNING: TRUSTED_PROXY_CIDRS is unset; X-Forwarded-* is ignored and the TCP peer address is used as the client IP. "+
+			"If torii runs behind a reverse proxy or has its port published by Docker, every client will share one address and therefore one rate-limit bucket — set it to the CIDR of the hop in front of torii.")
 	}
 
 	return &Config{

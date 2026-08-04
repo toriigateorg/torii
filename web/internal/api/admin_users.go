@@ -180,14 +180,43 @@ func (h *authHandlers) adminDeleteUser(c *echo.Context) error {
 	}
 	ctx := c.Request().Context()
 
-	if sole, err := h.userIsSoleAdmin(ctx, id); err != nil {
+	target, err := h.q.GetUserByID(ctx, id)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "user not found"})
+	}
+	// Deletion is the most destructive operation in the directory — it takes the
+	// account, its sessions and, irreversibly, its personal access tokens — yet it
+	// was the one users.* handler with no privilege ceiling, so a delegated
+	// operator holding users.delete could destroy an administrator who outranked
+	// them. Its milder siblings (password reset, unlock, role revoke) all guard.
+	if ok, err := h.guardOutranksTarget(c, id, target.Username, "delete"); !ok {
+		return err
+	}
+
+	// The sole-admin check and the delete run in one transaction behind the
+	// admin-guard advisory lock. Read-then-act outside a lock is a TOCTOU: two
+	// concurrent deletes of the last two admins each observed a count of two,
+	// each passed, and the deployment was left with no administrator and no
+	// in-product way back. Every other path that can remove an admin takes the
+	// same lock, so they serialise against each other too.
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", adminGuardLock); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
+	qtx := h.q.WithTx(tx)
+	if sole, err := userIsSoleAdmin(ctx, qtx, id); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	} else if sole {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "cannot delete the sole admin user"})
 	}
-
-	target, _ := h.q.GetUserByID(ctx, id)
-	if err := h.q.DeleteUser(ctx, id); err != nil {
+	if err := qtx.DeleteUser(ctx, id); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not delete user"})
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not delete user"})
 	}
 	uid := id
@@ -302,6 +331,31 @@ func (h *authHandlers) guardOutranksTarget(c *echo.Context, targetID uuid.UUID, 
 	return false, c.JSON(http.StatusForbidden, map[string]string{"error": "forbidden: cannot " + action + " a more privileged user"})
 }
 
+// guardReachesService applies callerReachesService, writing the 403 and the
+// audit trail when it fails. Same contract as guardOutranksTarget.
+func (h *authHandlers) guardReachesService(c *echo.Context, svcID uuid.UUID, svcTitle string) (bool, error) {
+	ok, err := h.callerReachesService(c.Request().Context(), auth.ClaimsFrom(c), svcID)
+	if err != nil {
+		return false, c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
+	if ok {
+		return true, nil
+	}
+	id := svcID
+	h.auditor.LogFromEcho(c, audit.Event{
+		EventType:  audit.EventAuthzDenied,
+		TargetType: audit.TargetService,
+		TargetID:   &id,
+		TargetName: svcTitle,
+		Metadata: map[string]any{
+			"reason": "caller cannot reach the service being bound or unbound",
+			"path":   c.Request().URL.Path,
+			"method": c.Request().Method,
+		},
+	})
+	return false, c.JSON(http.StatusForbidden, map[string]string{"error": "forbidden: cannot grant or revoke access to a service you cannot reach"})
+}
+
 // callerCanGrantRole reports whether the caller may hand out a role: only if
 // every authority the role carries is one the caller already holds. Assigning a
 // role the caller doesn't fully hold — the admin role above all — is privilege
@@ -337,9 +391,19 @@ func (h *authHandlers) callerReachesRoleServices(ctx context.Context, claims *au
 	if len(roleServices) == 0 {
 		return true, nil
 	}
-	// role_services.create already lets its holder bind any service to any role,
-	// so requiring them to reach the service first would gate nothing.
-	if claims.Has(auth.PermRoleServicesCreate) {
+	// A caller holding every permission is a full administrator. Same exemption,
+	// and for the same reason, as callerOutranksTarget: the admin system role
+	// carries no role_services rows, so a bare subset check would stop a real
+	// administrator from granting any service-bound role.
+	//
+	// There used to be a second short-circuit here for role_services.create,
+	// justified by that permission already letting its holder bind any service to
+	// any role. It did — adminAssignRoleService was unguarded — and the two holes
+	// composed: bind the target's services to a role you hold, and
+	// callerReachesUserServices (which reads live DB state) then reports you
+	// already reach everything they do, clearing the privilege ceiling on
+	// password reset. Both legs are closed now, so this must not come back.
+	if callerHoldsAll(claims, auth.AllPermissions) {
 		return true, nil
 	}
 	callerID, err := uuid.Parse(claims.Subject)
@@ -360,6 +424,32 @@ func (h *authHandlers) callerReachesRoleServices(ctx context.Context, claims *au
 		}
 	}
 	return true, nil
+}
+
+// callerReachesService reports whether the caller can already reach one specific
+// upstream. Full administrators are exempt for the reason given in
+// callerReachesRoleServices.
+func (h *authHandlers) callerReachesService(ctx context.Context, claims *auth.Claims, svcID uuid.UUID) (bool, error) {
+	if claims == nil {
+		return false, nil
+	}
+	if callerHoldsAll(claims, auth.AllPermissions) {
+		return true, nil
+	}
+	callerID, err := uuid.Parse(claims.Subject)
+	if err != nil {
+		return false, nil
+	}
+	reachable, err := h.q.ListServicesForUser(ctx, callerID)
+	if err != nil {
+		return false, err
+	}
+	for _, s := range reachable {
+		if s.ID == svcID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (h *authHandlers) logRoleGrantDenied(c *echo.Context, targetType string, targetID uuid.UUID, targetName string, role db.Role) {
@@ -392,8 +482,17 @@ func callerHoldsAll(claims *auth.Claims, perms []string) bool {
 	return true
 }
 
-func (h *authHandlers) userIsSoleAdmin(ctx context.Context, userID uuid.UUID) (bool, error) {
-	roles, err := h.q.ListUserRoles(ctx, userID)
+// adminGuardLock serialises every operation that can remove an administrator —
+// deleting an account and revoking the admin role. Both were check-then-act, so
+// two concurrent removals of the last two admins each saw a count of two and
+// both succeeded. Taking this lock inside the same transaction as the write
+// makes the check and the act atomic across replicas.
+const adminGuardLock = int64(74332)
+
+// userIsSoleAdmin takes a *db.Queries so callers can run it on a transaction,
+// which is the only way the count it returns is still true when they act on it.
+func userIsSoleAdmin(ctx context.Context, q *db.Queries, userID uuid.UUID) (bool, error) {
+	roles, err := q.ListUserRoles(ctx, userID)
 	if err != nil {
 		return false, err
 	}
@@ -407,7 +506,7 @@ func (h *authHandlers) userIsSoleAdmin(ctx context.Context, userID uuid.UUID) (b
 	if !hasAdmin {
 		return false, nil
 	}
-	count, err := h.q.CountAdmins(ctx)
+	count, err := q.CountAdmins(ctx)
 	if err != nil {
 		return false, err
 	}

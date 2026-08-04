@@ -11,9 +11,19 @@ declare global {
   }
 }
 
+// Snapshotted at module evaluation, before any application code — and therefore
+// before any injected upstream script — has run. window.__TORII_URL__ is a plain
+// writable global, so reading it lazily let same-origin script on a proxied host
+// rewrite it to that host's own name and make the domain gate conclude it was
+// already on the control plane. The snapshot is not a real defence against
+// same-origin script (nothing in the page is), but it removes the trivial
+// one-line bypass of a control that exists precisely to keep torii's credential
+// form off an upstream's origin.
+const injected = import.meta.client ? window.__TORII_URL__ : undefined
+
 export function useToriiUrl(): string {
-  if (import.meta.client && window.__TORII_URL__) {
-    return window.__TORII_URL__
+  if (injected) {
+    return injected
   }
   return useRuntimeConfig().public.toriiUrl as string
 }

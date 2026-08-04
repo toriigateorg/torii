@@ -70,8 +70,15 @@ type serviceDTO struct {
 	ReadTimeoutSecs   int32             `json:"read_timeout_secs"`
 	WriteTimeoutSecs  int32             `json:"write_timeout_secs"`
 	DialTimeoutSecs   int32             `json:"dial_timeout_secs"`
-	CreatedAt         string            `json:"created_at"`
-	UpdatedAt         string            `json:"updated_at"`
+	// HasSigningSecret reports whether X-Torii-Signature is being emitted for
+	// this upstream. The secret itself is never in a DTO. Without this the
+	// documented "upstreams verify the signature" contract was unobservable: a
+	// service with a NULL secret looks identical to one with a rotated secret, so
+	// an operator following the docs could believe identity assertions were
+	// authenticated when the headers were arriving unsigned.
+	HasSigningSecret bool   `json:"has_signing_secret"`
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
 }
 
 type adminServiceListResp struct {
@@ -171,6 +178,7 @@ func toServiceDTO(s db.Service) serviceDTO {
 		ReadTimeoutSecs:   s.ReadTimeoutSecs,
 		WriteTimeoutSecs:  s.WriteTimeoutSecs,
 		DialTimeoutSecs:   s.DialTimeoutSecs,
+		HasSigningSecret:  len(s.SigningSecret) > 0,
 		CreatedAt:         tsString(s.CreatedAt),
 		UpdatedAt:         tsString(s.UpdatedAt),
 	}
@@ -299,6 +307,22 @@ func (h *authHandlers) adminCreateService(c *echo.Context) error {
 			return c.JSON(http.StatusConflict, map[string]string{"error": "domain already in use"})
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not create service"})
+	}
+	// Give every service a signing secret at birth. It used to be NULL until an
+	// operator called rotate_signing_secret, which no client ever did, so the
+	// documented contract — "upstreams verify X-Torii-Signature" — was
+	// unsatisfiable through the product and every identity assertion torii
+	// injected arrived unsigned. The value is not returned here; the operator
+	// fetches it by rotating, same as for an existing service.
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	}
+	if rotated, err := h.q.RotateServiceSigningSecret(c.Request().Context(), db.RotateServiceSigningSecretParams{
+		ID:            svc.ID,
+		SigningSecret: secret,
+	}); err == nil {
+		svc = rotated
 	}
 	if h.cache != nil {
 		h.cache.Invalidate()

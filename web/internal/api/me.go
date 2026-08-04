@@ -169,6 +169,13 @@ func (h *authHandlers) adminRevokeUserSessions(c *echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "user not found"})
 	}
+	// PAT deletion is irreversible and the whole call is a denial of service
+	// against the target, so it carries the same ceiling as the other
+	// users.update operations: a delegated operator must not be able to cut off
+	// an administrator who outranks them.
+	if ok, err := h.guardOutranksTarget(c, id, user.Username, "revoke the sessions of"); !ok {
+		return err
+	}
 	if err := h.q.DeleteRefreshTokensForUser(ctx, id); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
 	}

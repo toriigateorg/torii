@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync"
 )
 
 // Trusted-proxy state. torii may itself sit behind an operator's reverse proxy,
@@ -45,6 +46,33 @@ func IPIsTrustedProxy(ip net.IP, nets []*net.IPNet) bool {
 		}
 	}
 	return false
+}
+
+// warnUntrustedForwardedOnce fires the first time a request arrives carrying
+// X-Forwarded-For from a peer torii does not trust. That combination means
+// something in front of torii believes it is a reverse proxy while torii does
+// not, which silently collapses every per-IP rate limiter and every audit
+// source-IP into the one address of that hop. A startup warning cannot detect
+// it (an unset CIDR list is legitimate for a directly-exposed torii); only a
+// live request can.
+var warnUntrustedForwardedOnce sync.Once
+
+// WarnOnMisconfiguredTrust reports the peer/XFF mismatch described above, once
+// per process, naming the peer so the operator can paste it into
+// TRUSTED_PROXY_CIDRS.
+func WarnOnMisconfiguredTrust(r *http.Request) {
+	if r.Header.Get("X-Forwarded-For") == "" || PeerIsTrustedProxy(r) {
+		return
+	}
+	warnUntrustedForwardedOnce.Do(func() {
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			host = r.RemoteAddr
+		}
+		fmt.Fprintf(os.Stderr, "[trust] WARNING: request from %s carried X-Forwarded-For but that peer is not in TRUSTED_PROXY_CIDRS. "+
+			"Every client is being attributed to %s, so per-IP rate limits and audit source IPs are meaningless. "+
+			"Set TRUSTED_PROXY_CIDRS to the CIDR containing %s if it is your reverse proxy.\n", host, host, host)
+	})
 }
 
 // PeerIsTrustedProxy reports whether the request's immediate peer is a

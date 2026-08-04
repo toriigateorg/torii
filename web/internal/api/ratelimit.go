@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"net/netip"
+	"strings"
 	"sync"
 	"time"
 
@@ -78,6 +79,26 @@ func limiterKey(ip string) string {
 		return ip
 	}
 	return prefix.String()
+}
+
+// identifierLimiter bounds password attempts per account, independent of where
+// they come from. Every other bound on guessing is per-IP, and a per-IP bound is
+// only as good as torii's view of the client address — which is one constant
+// value whenever something in front of torii forwards without being trusted, and
+// is distributable in any case. The failed-login lockout is per-account but an
+// attacker who can clear it (or who targets an account with SSO signin) is back
+// to unbounded.
+//
+// Deliberately loose: 1/s with a burst of 10, roughly the rate a human retrying
+// a forgotten password produces, and well under what credential stuffing needs.
+// It is not an additional lockout — the bucket refills continuously.
+var identifierLimiter = newIPRateLimiter(rate.Every(time.Second), 10)
+
+// allowIdentifierAttempt reports whether another password attempt against this
+// identifier may proceed. Case-folded so 'Admin' and 'admin' share a bucket, as
+// they share an account.
+func allowIdentifierAttempt(identifier string) bool {
+	return identifierLimiter.get(strings.ToLower(strings.TrimSpace(identifier))).Allow()
 }
 
 // rateLimit returns echo middleware that allows up to `burst` requests

@@ -61,12 +61,12 @@ func Handler(toriiURL string) echo.HandlerFunc {
 }
 
 func buildInjection(toriiURL string) []byte {
+	// json.Marshal already escapes <, > and & to < / > / &, so the
+	// value cannot close the <script> element. The replacer that used to sit here
+	// mapped every character to itself and did nothing; the escaping it claimed
+	// to add was already being done one line above.
 	encoded, _ := json.Marshal(toriiURL)
-	// json.Marshal does not escape "<", so a TORII_URL containing "</script>"
-	// would close the element and everything after it would parse as markup.
-	// Operator-controlled, but escaping it costs nothing.
-	escaped := strings.NewReplacer("<", `<`, ">", `>`, "&", `&`).Replace(string(encoded))
-	return []byte("<script>window.__TORII_URL__=" + escaped + "</script>")
+	return []byte("<script>window.__TORII_URL__=" + string(encoded) + "</script>")
 }
 
 // htmlInjector buffers the upstream FileServer response so we can splice a

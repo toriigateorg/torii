@@ -489,6 +489,25 @@ func (h *authHandlers) adminAssignRoleService(c *echo.Context) error {
 			"error": "binding a service to the 'all' role exposes it to every account; set confirm_public_exposure to proceed",
 		})
 	}
+	// Binding is a privilege grant in both directions and was unguarded, which
+	// made it a way to manufacture the very reach the impersonation ceiling
+	// tests: bind a target's services to a role the caller holds, and
+	// callerReachesUserServices — which reads live DB state — then reports the
+	// caller already reaches everything the target does, so the password-reset
+	// ceiling passes and the caller can sign in as them.
+	//
+	// So both halves are checked. The caller must already reach the upstream
+	// being handed out, and must be able to grant the role that will now confer
+	// it.
+	if ok, err := h.guardReachesService(c, svc.ID, svc.Title); !ok {
+		return err
+	}
+	if ok, err := h.callerCanGrantRole(ctx, auth.ClaimsFrom(c), roleID); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	} else if !ok {
+		h.logRoleGrantDenied(c, audit.TargetRole, roleID, role.Name, role)
+		return c.JSON(http.StatusForbidden, map[string]string{"error": errCannotGrantRole})
+	}
 	if err := h.q.AssignRoleService(ctx, db.AssignRoleServiceParams{RoleID: roleID, ServiceID: svcID}); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not assign service"})
 	}
@@ -520,8 +539,27 @@ func (h *authHandlers) adminRevokeRoleService(c *echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid service id"})
 	}
 	ctx := c.Request().Context()
-	role, _ := h.q.GetRoleByID(ctx, roleID)
-	svc, _ := h.q.GetServiceByID(ctx, svcID)
+	role, err := h.q.GetRoleByID(ctx, roleID)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "role not found"})
+	}
+	svc, err := h.q.GetServiceByID(ctx, svcID)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "service not found"})
+	}
+	// Unbinding is a denial of service against everyone holding the role, and
+	// unbinding from 'all' cuts every account off from that upstream at once.
+	// Mirror the assign guard: you may only take away access you could have
+	// granted.
+	if ok, err := h.guardReachesService(c, svc.ID, svc.Title); !ok {
+		return err
+	}
+	if ok, err := h.callerCanGrantRole(ctx, auth.ClaimsFrom(c), roleID); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "server error"})
+	} else if !ok {
+		h.logRoleGrantDenied(c, audit.TargetRole, roleID, role.Name, role)
+		return c.JSON(http.StatusForbidden, map[string]string{"error": errCannotRevokeRole})
+	}
 	if err := h.q.RevokeRoleService(ctx, db.RevokeRoleServiceParams{RoleID: roleID, ServiceID: svcID}); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not revoke service"})
 	}
