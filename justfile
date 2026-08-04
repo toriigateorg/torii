@@ -99,6 +99,17 @@ release KIND="patch":
         exit 1
     fi
 
+    # Validate the config before anything irreversible happens. goreleaser is the
+    # last step, so a malformed .goreleaser.yml used to surface only after VERSION
+    # had been bumped, committed, tagged and pushed — leaving a tag on the remote
+    # with no release behind it.
+    echo "==> checking .goreleaser.yml"
+    docker run --rm \
+        -v "$PWD:/workspace" \
+        -w /workspace \
+        {{ releaser_image }} \
+        check
+
     cur=$(cat VERSION)
     IFS=. read -r maj min pat <<< "$cur"
     case "{{ KIND }}" in

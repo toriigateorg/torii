@@ -11,11 +11,13 @@ project_name: torii
 # `just release` and `just release-snapshot` invoke build-spa for you. Running
 # goreleaser directly requires running it first.
 #
-# No backticks below: in a plain YAML scalar they reach sh inside double quotes
-# and get command-substituted.
+# Two things a plain YAML scalar cannot contain: a colon followed by a space
+# (YAML reads it as a mapping and the parse fails) and backticks (they reach sh
+# inside double quotes and get command-substituted). Keep both out of the hooks
+# below, or quote the whole scalar.
 before:
   hooks:
-    - sh -c "test -f web/internal/web/dist/index.html || { echo 'error: web/internal/web/dist is not staged. Run: just build-spa' >&2; exit 1; }"
+    - sh -c "test -f web/internal/web/dist/index.html || (echo 'web/internal/web/dist is not staged -- run just build-spa' >&2; exit 1)"
     - sh -c "bun web/client/scripts/verify-output.mjs web/internal/web/dist"
 
 builds:
