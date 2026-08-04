@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -31,8 +30,8 @@ const handoffTTL = 30 * time.Second
 // access token (with empty permissions) and authenticated bare RequireUser
 // endpoints on the control-plane host. It also has a very short TTL (30s), is
 // bound to a specific target host so it can only be consumed at the destination
-// it was minted for, and carries a random jti that ConsumeHandoffJTI burns on
-// first use.
+// it was minted for, and carries a random jti that is burned in the handoff_jtis
+// table on first use.
 //
 // Confirmation carries the SHA-256 of a correlator secret set as a host-scoped
 // cookie on the service host *before* the flow left it, and redemption requires
@@ -49,9 +48,16 @@ type HandoffClaims struct {
 	jwt.RegisteredClaims
 }
 
-// HandoffCorrelatorCookie holds the correlator secret. Host-scoped and
-// path-scoped to torii's own namespace, so it is never sent to an upstream.
-const HandoffCorrelatorCookie = "torii_handoff_cor"
+// HandoffCorrelatorCookie holds the correlator secret. A variable, not a
+// constant, because production switches it to the __Host- prefixed form; see
+// UseHostPrefixedCookies.
+//
+// The prefix is load-bearing here, not just tidiness. The correlator is what binds
+// a handoff token to one browser, so a script on a sibling host that could forge a
+// same-named domain-scoped cookie would defeat the binding — the very cookie-
+// tossing mechanism the prefix exists to stop. Prefixing it means the two fixes
+// hold each other up rather than one undercutting the other.
+var HandoffCorrelatorCookie = legacyCorrelatorCooky
 
 // HandoffCorrelatorTTL bounds how long a started handoff may be completed. It has
 // to outlast the interactive leg (a password entry or a full OIDC round trip),
@@ -81,7 +87,10 @@ func SetHandoffCorrelator(c *echo.Context, secret string, secure bool) {
 	c.SetCookie(&http.Cookie{
 		Name:     HandoffCorrelatorCookie,
 		Value:    secret,
-		Path:     "/_torii/",
+		// Path=/ because __Host- mandates it. That means the cookie rides along on
+		// requests to upstream paths on a service host, so it is in the proxy's
+		// strip list (see auth.ToriiCookieNames) and never reaches an upstream.
+		Path:     "/",
 		Expires:  time.Now().Add(HandoffCorrelatorTTL),
 		MaxAge:   int(HandoffCorrelatorTTL.Seconds()),
 		HttpOnly: true,
@@ -96,7 +105,10 @@ func ClearHandoffCorrelator(c *echo.Context, secure bool) {
 	c.SetCookie(&http.Cookie{
 		Name:     HandoffCorrelatorCookie,
 		Value:    "",
-		Path:     "/_torii/",
+		// Path=/ because __Host- mandates it. That means the cookie rides along on
+		// requests to upstream paths on a service host, so it is in the proxy's
+		// strip list (see auth.ToriiCookieNames) and never reaches an upstream.
+		Path:     "/",
 		Expires:  time.Unix(0, 0),
 		MaxAge:   -1,
 		HttpOnly: true,
@@ -167,35 +179,9 @@ func ParseHandoffToken(token string, secret []byte) (*HandoffClaims, error) {
 	return claims, nil
 }
 
-// handoffReplay remembers spent handoff token ids until they expire. It is
-// process-local: torii answers both TORII_URL and every service host, so a
-// single instance sees the mint and the redemption. Across replicas a token
-// could still be redeemed once per replica within its 30s window — the token
-// never appears in a URL query, Referer, or server log, so that residual is
-// bounded by an attacker who already holds the token.
-var handoffReplay = struct {
-	sync.Mutex
-	spent map[string]time.Time
-}{spent: make(map[string]time.Time)}
-
-// ConsumeHandoffJTI burns a handoff token id and reports whether this call was
-// its first use. Anything already spent (or replayed after expiry) returns
-// false and must be rejected.
-func ConsumeHandoffJTI(jti string, expiresAt time.Time) bool {
-	now := time.Now()
-	if jti == "" || !expiresAt.After(now) {
-		return false
-	}
-	handoffReplay.Lock()
-	defer handoffReplay.Unlock()
-	for id, exp := range handoffReplay.spent {
-		if !exp.After(now) {
-			delete(handoffReplay.spent, id)
-		}
-	}
-	if _, ok := handoffReplay.spent[jti]; ok {
-		return false
-	}
-	handoffReplay.spent[jti] = expiresAt
-	return true
+// HandoffJTIFresh reports whether a token id is still worth attempting to burn.
+// The burn itself is a database insert (see api.ssoHandoff and the handoff_jtis
+// table), because a process-local ledger only bounded replays within one replica.
+func HandoffJTIFresh(jti string, expiresAt time.Time) bool {
+	return jti != "" && expiresAt.After(time.Now())
 }

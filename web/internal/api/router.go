@@ -139,6 +139,7 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, cfg *config.Config, cache *proxy
 	h := &authHandlers{pool: pool, q: db.New(pool), cfg: cfg, cache: cache, auditor: auditor}
 	auth.SetAPITokenResolver(h.resolveAPIToken)
 	auth.SetServiceTokenResolver(h.resolveServiceToken)
+	go h.sweepHandoffJTIs()
 
 	// authLimiter: 10 req/min/IP, burst 5. Tight because each signin/signup
 	// triggers argon2id (64 MiB, t=2) — without a limit a single attacker

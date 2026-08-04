@@ -106,7 +106,7 @@ func (c *Config) IsProd() bool { return c.AppEnv != "dev" }
 // torii control plane. Comparison is case-insensitive and tolerates the
 // default :80/:443 ports being implicit on either side.
 func (c *Config) IsToriiHost(host string) bool {
-	return canonicalHost(host) == canonicalHost(c.ToriiURL)
+	return CanonicalHost(host) == CanonicalHost(c.ToriiURL)
 }
 
 func isLowEntropy(s string) bool {
@@ -122,7 +122,12 @@ func isLowEntropy(s string) bool {
 	return true
 }
 
-func canonicalHost(h string) string {
+// CanonicalHost normalises a Host header for comparison: lowercased, trimmed, with
+// an implicit :80/:443 removed. Exported because the refresh-token host binding
+// (migration 0017) has to compare the host a token was issued for against the host
+// now serving the request using exactly the same normalisation the audience check
+// uses — two subtly different notions of "same host" would be a hole.
+func CanonicalHost(h string) string {
 	h = strings.ToLower(strings.TrimSpace(h))
 	h = strings.TrimSuffix(h, ":443")
 	h = strings.TrimSuffix(h, ":80")

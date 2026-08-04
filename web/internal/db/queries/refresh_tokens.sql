@@ -1,6 +1,9 @@
 -- name: CreateRefreshToken :one
-INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
-VALUES ($1, $2, $3)
+-- host is the canonical host the session was established on. Rotation compares it
+-- against the host now serving the request, so a token planted on a sibling host
+-- (see migration 0017) cannot be redeemed.
+INSERT INTO refresh_tokens (user_id, token_hash, expires_at, host)
+VALUES ($1, $2, $3, $4)
 RETURNING *;
 
 -- name: GetRefreshTokenByHash :one

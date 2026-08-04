@@ -15,7 +15,7 @@ import (
 const consumeRefreshTokenByHash = `-- name: ConsumeRefreshTokenByHash :one
 DELETE FROM refresh_tokens
 WHERE token_hash = $1
-RETURNING id, user_id, token_hash, expires_at, created_at, revoked_at
+RETURNING id, user_id, token_hash, expires_at, created_at, revoked_at, host
 `
 
 // Atomic select-and-delete for rotation. A read followed by a separate delete
@@ -33,6 +33,7 @@ func (q *Queries) ConsumeRefreshTokenByHash(ctx context.Context, tokenHash []byt
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.RevokedAt,
+		&i.Host,
 	)
 	return i, err
 }
@@ -61,19 +62,28 @@ func (q *Queries) CountRefreshTokens(ctx context.Context) (int64, error) {
 }
 
 const createRefreshToken = `-- name: CreateRefreshToken :one
-INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
-VALUES ($1, $2, $3)
-RETURNING id, user_id, token_hash, expires_at, created_at, revoked_at
+INSERT INTO refresh_tokens (user_id, token_hash, expires_at, host)
+VALUES ($1, $2, $3, $4)
+RETURNING id, user_id, token_hash, expires_at, created_at, revoked_at, host
 `
 
 type CreateRefreshTokenParams struct {
 	UserID    uuid.UUID
 	TokenHash []byte
 	ExpiresAt pgtype.Timestamptz
+	Host      string
 }
 
+// host is the canonical host the session was established on. Rotation compares it
+// against the host now serving the request, so a token planted on a sibling host
+// (see migration 0017) cannot be redeemed.
 func (q *Queries) CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) (RefreshToken, error) {
-	row := q.db.QueryRow(ctx, createRefreshToken, arg.UserID, arg.TokenHash, arg.ExpiresAt)
+	row := q.db.QueryRow(ctx, createRefreshToken,
+		arg.UserID,
+		arg.TokenHash,
+		arg.ExpiresAt,
+		arg.Host,
+	)
 	var i RefreshToken
 	err := row.Scan(
 		&i.ID,
@@ -82,6 +92,7 @@ func (q *Queries) CreateRefreshToken(ctx context.Context, arg CreateRefreshToken
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.RevokedAt,
+		&i.Host,
 	)
 	return i, err
 }
@@ -126,7 +137,7 @@ func (q *Queries) DeleteRefreshTokensForUser(ctx context.Context, userID uuid.UU
 }
 
 const getRefreshTokenByHash = `-- name: GetRefreshTokenByHash :one
-SELECT id, user_id, token_hash, expires_at, created_at, revoked_at FROM refresh_tokens WHERE token_hash = $1
+SELECT id, user_id, token_hash, expires_at, created_at, revoked_at, host FROM refresh_tokens WHERE token_hash = $1
 `
 
 func (q *Queries) GetRefreshTokenByHash(ctx context.Context, tokenHash []byte) (RefreshToken, error) {
@@ -139,12 +150,13 @@ func (q *Queries) GetRefreshTokenByHash(ctx context.Context, tokenHash []byte) (
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.RevokedAt,
+		&i.Host,
 	)
 	return i, err
 }
 
 const getRefreshTokenByID = `-- name: GetRefreshTokenByID :one
-SELECT id, user_id, token_hash, expires_at, created_at, revoked_at FROM refresh_tokens WHERE id = $1
+SELECT id, user_id, token_hash, expires_at, created_at, revoked_at, host FROM refresh_tokens WHERE id = $1
 `
 
 func (q *Queries) GetRefreshTokenByID(ctx context.Context, id uuid.UUID) (RefreshToken, error) {
@@ -157,6 +169,7 @@ func (q *Queries) GetRefreshTokenByID(ctx context.Context, id uuid.UUID) (Refres
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.RevokedAt,
+		&i.Host,
 	)
 	return i, err
 }

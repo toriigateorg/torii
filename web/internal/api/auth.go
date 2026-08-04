@@ -503,6 +503,17 @@ func (h *authHandlers) tokenRefresh(c *echo.Context) error {
 		refreshFail("expired_or_revoked", &uid)
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "refresh token expired"})
 	}
+	// The token is only valid on the host it was issued for. This is what defeats
+	// cookie tossing server-side: a token the attacker minted for themselves and
+	// planted in the victim's jar with Domain=example.com no longer rotates on a
+	// sibling host. Rows predating migration 0017 carry '' and never match, so they
+	// fail closed and their owners sign in once more.
+	if row.Host != config.CanonicalHost(c.Request().Host) {
+		auth.ClearAuthCookies(c, secure)
+		uid := row.UserID
+		refreshFail("host_mismatch", &uid)
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "refresh token was not issued for this host"})
+	}
 
 	user, err := h.q.GetUserByID(ctx, row.UserID)
 	if err != nil {
@@ -527,6 +538,16 @@ func (h *authHandlers) tokenRefresh(c *echo.Context) error {
 
 func (h *authHandlers) logout(c *echo.Context) error {
 	secure := h.cfg.IsProd()
+	// Same-origin only. This endpoint is unauthenticated and answered on every
+	// proxied host, and it is deliberately exempt from the cookie CSRF gate
+	// (isCookieAllowedPath), so a cross-site auto-submitting form POST could delete
+	// any visitor's host-only session cookies. On its own that is a nuisance
+	// logout; combined with a domain-scoped cookie planted from a sibling host it
+	// was the primitive that decided *which* cookie won, by removing the victim's
+	// real one and leaving the attacker's in place.
+	if !auth.IsSameOrigin(c.Request()) {
+		return c.JSON(http.StatusForbidden, map[string]string{"error": "forbidden: cross-origin logout"})
+	}
 	terminated := false
 	if cookie, err := c.Cookie(auth.RefreshCookie); err == nil && cookie.Value != "" {
 		_ = h.q.DeleteRefreshTokenByHash(c.Request().Context(), auth.HashRefreshToken(cookie.Value))
@@ -545,8 +566,9 @@ func (h *authHandlers) logout(c *echo.Context) error {
 	// page could destroy that state with a top-level auto-submitting form POST
 	// to https://<service-host>/_torii/api/v1/logout. Emitted only when a
 	// session was actually terminated and the caller is same-origin, so the
-	// cross-site navigation gets no header at all.
-	if terminated && auth.IsSameOrigin(c.Request()) {
+	// cross-site navigation gets no header at all — which the same-origin gate at
+	// the top of this handler now guarantees anyway.
+	if terminated {
 		c.Response().Header().Set("Clear-Site-Data", `"cache"`)
 	}
 	c.Response().Header().Set("Cache-Control", "no-store")
@@ -611,10 +633,14 @@ func (h *authHandlers) issueSession(ctx context.Context, c *echo.Context, user d
 	if err != nil {
 		return "", nil, nil, err
 	}
+	// Bind the token to the host this session was established on. Without it one
+	// refresh token minted sessions on every host, which is what made a cookie
+	// planted from a sibling host redeemable — see migration 0017.
 	if _, err := h.q.CreateRefreshToken(ctx, db.CreateRefreshTokenParams{
 		UserID:    user.ID,
 		TokenHash: hash,
 		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(h.cfg.RefreshTokenTTL), Valid: true},
+		Host:      config.CanonicalHost(c.Request().Host),
 	}); err != nil {
 		return "", nil, nil, err
 	}
@@ -784,6 +810,16 @@ func (h *authHandlers) AttemptCookieRefresh(c *echo.Context) (*auth.Claims, erro
 		uid := row.UserID
 		refreshFail("expired_or_revoked", &uid)
 		return nil, errors.New("refresh token expired or revoked")
+	}
+	// Mirrors tokenRefresh. This is the path dispatch bounces a planted
+	// torii_session marker into, so it is the one the cookie-tossing attack
+	// actually drove — checking the binding only on the other path would have left
+	// the exploited half open.
+	if row.Host != config.CanonicalHost(c.Request().Host) {
+		auth.ClearAuthCookies(c, secure)
+		uid := row.UserID
+		refreshFail("host_mismatch", &uid)
+		return nil, errors.New("refresh token was not issued for this host")
 	}
 	user, err := h.q.GetUserByID(ctx, row.UserID)
 	if err != nil {

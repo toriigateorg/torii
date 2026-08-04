@@ -6,9 +6,11 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -554,7 +556,18 @@ func (h *authHandlers) ssoHandoff(c *echo.Context) error {
 	if err != nil {
 		return handoffError(c)
 	}
-	if claims.ExpiresAt == nil || !auth.ConsumeHandoffJTI(claims.ID, claims.ExpiresAt.Time) {
+	if claims.ExpiresAt == nil || !auth.HandoffJTIFresh(claims.ID, claims.ExpiresAt.Time) {
+		return handoffError(c)
+	}
+	// Burn the id in the database, not in a process-local map: torii answers both
+	// TORII_URL and every service host, so one instance saw both the mint and the
+	// redemption, but nothing shared that with the other replicas — a token was
+	// redeemable once per replica inside its 30s window. ON CONFLICT DO NOTHING
+	// means a second presentation gets pgx.ErrNoRows and Postgres picks the winner.
+	if _, err := h.q.BurnHandoffJTI(c.Request().Context(), db.BurnHandoffJTIParams{
+		Jti:       claims.ID,
+		ExpiresAt: pgtype.Timestamptz{Time: claims.ExpiresAt.Time, Valid: true},
+	}); err != nil {
 		return handoffError(c)
 	}
 	user, err := h.q.GetUserByID(c.Request().Context(), uid)
@@ -565,6 +578,23 @@ func (h *authHandlers) ssoHandoff(c *echo.Context) error {
 		return handoffError(c)
 	}
 	return c.JSON(http.StatusOK, map[string]bool{"ok": true})
+}
+
+// handoffJTISweep is how often spent handoff ids are collected. Rows are only
+// meaningful for the token's 30s lifetime, so anything on this order is ample;
+// without the sweep the table grows by one row per cross-host login forever.
+const handoffJTISweep = 10 * time.Minute
+
+func (h *authHandlers) sweepHandoffJTIs() {
+	t := time.NewTicker(handoffJTISweep)
+	defer t.Stop()
+	for range t.C {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if _, err := h.q.DeleteExpiredHandoffJTIs(ctx); err != nil {
+			fmt.Fprintln(os.Stderr, "[handoff] jti sweep failed:", err)
+		}
+		cancel()
+	}
 }
 
 func handoffError(c *echo.Context) error {

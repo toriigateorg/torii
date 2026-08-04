@@ -240,7 +240,10 @@ func ProxyTo(svc *CachedService, ident Identity, c *echo.Context) error {
 		// Runs before ReverseProxy's own X-Forwarded-For append, so dropping the
 		// header here leaves the append to rebuild it from RemoteAddr.
 		stripForwardedHeaders(req.Header, trustedPeer)
-		stripCookies(req, auth.AccessCookie, auth.RefreshCookie, auth.SessionCookie)
+		// Every name torii owns, current and legacy. The handoff correlator is in
+		// this set too: __Host- forces it to Path=/, so it rides along on upstream
+		// paths and would otherwise be readable by the upstream.
+		stripCookies(req, auth.ToriiCookieNames()...)
 
 		// ReverseProxy strips hop-by-hop headers AFTER the director runs, and
 		// that pass deletes every header named in the request's Connection
@@ -413,10 +416,18 @@ func SetDeadlines(w http.ResponseWriter, read, write time.Duration) {
 
 // toriiReservedCookies are the cookie names torii sets itself. Nothing behind
 // the proxy has any business defining them.
-var toriiReservedCookies = map[string]struct{}{
-	auth.AccessCookie:  {},
-	auth.RefreshCookie: {},
-	auth.SessionCookie: {},
+//
+// Built per call rather than once at init: the names are decided at startup
+// (production uses the __Host- prefixed forms), so a package-level map would
+// capture the unprefixed spellings and then forward the real cookies straight to
+// upstreams. Four to eight entries, so the allocation is not worth avoiding.
+func toriiReservedCookies() map[string]struct{} {
+	names := auth.ToriiCookieNames()
+	m := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		m[n] = struct{}{}
+	}
+	return m
 }
 
 // stripUpstreamAuthCookies drops Set-Cookie headers that would define one of
@@ -435,13 +446,14 @@ func stripUpstreamAuthCookies(h http.Header) {
 	if len(values) == 0 {
 		return
 	}
+	reserved := toriiReservedCookies()
 	kept := make([]string, 0, len(values))
 	for _, v := range values {
 		name := v
 		if eq := strings.IndexByte(v, '='); eq >= 0 {
 			name = v[:eq]
 		}
-		if _, reserved := toriiReservedCookies[strings.TrimSpace(name)]; reserved {
+		if _, bad := reserved[strings.TrimSpace(name)]; bad {
 			continue
 		}
 		kept = append(kept, v)

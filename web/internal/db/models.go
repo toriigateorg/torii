@@ -59,6 +59,12 @@ type AuditLog struct {
 	Metadata      []byte
 }
 
+type HandoffJti struct {
+	Jti       string
+	ExpiresAt pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
+}
+
 type RefreshToken struct {
 	ID        uuid.UUID
 	UserID    uuid.UUID
@@ -66,6 +72,7 @@ type RefreshToken struct {
 	ExpiresAt pgtype.Timestamptz
 	CreatedAt pgtype.Timestamptz
 	RevokedAt pgtype.Timestamptz
+	Host      string
 }
 
 type Role struct {

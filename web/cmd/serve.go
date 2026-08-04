@@ -159,6 +159,15 @@ func runInner(ctx context.Context, host string, port int) error {
 	if cfg != nil && pool != nil {
 		prepareBootstrapToken(ctx, cfg, db.New(pool))
 	}
+	// Switch to __Host- prefixed cookie names, which the browser refuses to store
+	// unless they are Secure, Path=/ and carry no Domain — so a sibling host cannot
+	// forge one across the registrable domain. Gated on IsProd because the prefix
+	// requires Secure and dev serves plain HTTP; a __Host- cookie sent without
+	// Secure is dropped by the browser, which would lock everyone out. Must happen
+	// before the first request is served, and nothing mutates the names afterwards.
+	if cfg != nil && cfg.IsProd() {
+		auth.UseHostPrefixedCookies()
+	}
 
 	e := echo.New()
 	if cfg != nil {
